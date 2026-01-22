@@ -47,6 +47,8 @@ Can you check the docs and explain how the project works? #ask_report
 - IDE Integration:
   - **code_checker**: Retrieve current diagnostics for your code
   - **focus_editor**: Focus specific locations within files
+- Local Search:
+  - **ripgrep**: Fast, index-independent search that ignores .git/info/exclude rules (uses the rg binary)
 - The Crown Jewel of the Extension:
   - **ask_report**: Prompt the user via a webview using Markdown and optional predefined options.
   - **ai_fetch_url**: Fetching and extracting web content data using a sub-agent
@@ -94,6 +96,26 @@ Can you check the docs and explain how the project works? #ask_report
    3. **Third priority**: `browser_navigate` if the request is blocked or local debugging of web resources is required
    4. **Rule**: Always try Context7 first for technical/programming queries
    5. **Rule**: Always use ONLY `execute_command`, `get_terminal_output` instead of any other command line tool to perform tasks
+
+   ## Gathering context
+
+   - HARDMUST: `semantic_search` is strictly FORBIDDEN in ALL cases (it is unreliable/disabled by policy). Do not call it even "just to try". Any usage = BLOCKER.
+
+   - HARDMUST: If an exact absolute path is known (or the file is already provided in attachments), it is strictly FORBIDDEN to use ANY repository-wide search/discovery to access that file (including `file_search`). Only direct operations are allowed: `read_file`, `apply_patch`/`insert_edit_into_file`, `create_file`, `list_dir` on that exact path.
+
+   - HARDMUST: If the file contents are already available and sufficient, do NOT call `read_file` again (only read again if the provided excerpt is incomplete for the task).
+
+   - PRE-FLIGHT CHECK (mandatory before any search): "Do I know the absolute path or already have the contents?" If YES — cancel the search immediately.
+
+   - REPOSITORY DISCOVERY (when path/name is unknown): Use the `ripgrep` tool (structured search). Prefer `ripgrep` over any "semantic" tooling.
+    - Example (search in Obsidian developer docs):
+      - ripgrep: { pattern: "registerEvent", paths: ["references/obsidian-developer-docs/en"], caseMode: "smart", glob: ["*.md"] }
+    - Example (search in source code):
+      - ripgrep: { pattern: "class ActionHandler", paths: ["src"], caseMode: "smart", glob: ["*.ts"] }
+    - Example (list matching files only):
+      - Run `ripgrep` and collect unique `matches[].path` from the results:
+        - ripgrep: { pattern: "registerEvent", paths: ["references/obsidian-developer-docs/en"], caseMode: "smart", glob: ["*.md"], contextLines: 0 }
+   - ALLOWED: `file_search` is permitted ONLY to discover filenames/paths. It must NEVER be used when an absolute path is already known.
 
    ## Terminal Analysis
 
@@ -145,10 +167,12 @@ Can you check the docs and explain how the project works? #ask_report
 
 4. Stock up on tokens — you'll need them for maximum comfort:
 
-- [context7.com/dashboard](https://context7.com/dashboard)
-- [Google API](https://support.google.com/googleapi/answer/6158862?hl=en)
-- [Google Search Engine ID](https://support.google.com/programmable-search/answer/12499034?hl=en)
-- [Create a GitHub Personal Access Token](https://github.com/settings/personal-access-tokens/new)
+   - [context7.com/dashboard](https://context7.com/dashboard)
+   - [Google API](https://support.google.com/googleapi/answer/6158862?hl=en)
+   - [Google Search Engine ID](https://support.google.com/programmable-search/answer/12499034?hl=en)
+   - [Create a GitHub Personal Access Token](https://github.com/settings/personal-access-tokens/new)
+
+5. Install ripgrep (rg) if not installed: [ripgrep installation](https://github.com/BurntSushi/ripgrep?tab=readme-ov-file#installation)
 
 ## Why Not MCP?
 
