@@ -48,6 +48,11 @@ export type AskReportInput = {
 export async function askReport(opts: AskReportOptions): Promise<AskUserResult> {
     const title = opts.title ?? 'Ask Report'
 
+    // Read timeout from settings early because initial webview rendering must not depend on postMessage timing.
+    const timeout = vscode.workspace
+        .getConfiguration('reliefpilot')
+        .get<number>('askReportTimeoutSeconds', 60)
+
     // Resolve extension media folder for localResourceRoots
     const extensionUri = env.extensionUri
     const mediaRoot = vscode.Uri.joinPath(extensionUri, 'media')
@@ -107,6 +112,15 @@ export async function askReport(opts: AskReportOptions): Promise<AskUserResult> 
         `script-src 'nonce-${nonce}'`,
     ].join('; ')
 
+    // Inline bootstrap payload into HTML to avoid relying on a single postMessage(init) that can be dropped.
+    const bootstrapPayload = {
+        markdown: opts.markdown,
+        initialValue: opts.initialValue ?? '',
+        options: opts.predefinedOptions ?? [],
+        timeout: opts.readOnly ? 0 : timeout,
+        readonly: opts.readOnly === true,
+    }
+
     panel.webview.html = `<!DOCTYPE html>
 <html lang="en">
     <head>
@@ -141,6 +155,7 @@ export async function askReport(opts: AskReportOptions): Promise<AskUserResult> 
                 <button id="cancelBtn" class="btn" aria-label="Cancel">Cancel</button>
             </div>
         </footer>
+        <script nonce="${nonce}">const BOOTSTRAP = ${serializeForHtmlScriptTag(bootstrapPayload)};</script>
     <script nonce="${nonce}" src="${markdownDepsUri}"></script>
     <script nonce="${nonce}" src="${markdownEnhanceUri}"></script>
         <script nonce="${nonce}">
@@ -172,6 +187,9 @@ export async function askReport(opts: AskReportOptions): Promise<AskUserResult> 
             let paused = false;
             /** @type {number | undefined} */
             let intervalId = undefined;
+
+            /** @type {boolean} */
+            let markdownLinkHandlerAttached = false;
 
             // SVG icon helpers
             function setCopyIcon() {
@@ -450,10 +468,24 @@ export async function askReport(opts: AskReportOptions): Promise<AskUserResult> 
                 // Recompute reserved space when viewport changes
                 window.addEventListener('resize', () => updateDockHeightVar());
 
-            window.addEventListener('message', (event) => {
-                const msg = event.data;
-                if (!msg || msg.type !== 'init') return;
-                initData = msg.payload || initData;
+            function attachMarkdownLinkInterceptorOnce() {
+                if (markdownLinkHandlerAttached) return;
+                markdownLinkHandlerAttached = true;
+                // Intercept clicks on links to send openExternal
+                el.markdown.addEventListener('click', (e) => {
+                    const target = e.target;
+                    if (target && target.tagName === 'A') {
+                        e.preventDefault();
+                        const href = target.getAttribute('href') || '';
+                        if (href) {
+                            vscode.postMessage({ type: 'openExternal', url: href });
+                        }
+                    }
+                });
+            }
+
+            function applyInit(payload) {
+                initData = payload || initData;
                 try {
                     if (window.ReliefPilotMarkdownEnhancer) {
                         window.ReliefPilotMarkdownEnhancer.render(el.markdown, initData.markdown || '', (text) => { try { vscode.postMessage({ type: 'copy', text }); } catch {} });
@@ -463,6 +495,7 @@ export async function askReport(opts: AskReportOptions): Promise<AskUserResult> 
                         el.markdown.textContent = initData.markdown || '';
                     }
                 } catch { el.markdown.textContent = initData.markdown || ''; }
+
                 // Try restoring from saved state if present
                 const savedState = vscode.getState() || {};
 
@@ -515,38 +548,35 @@ export async function askReport(opts: AskReportOptions): Promise<AskUserResult> 
                 setCopyIcon();
                 setSaveIcon();
                 setPausePlayIcon();
+
                 // Apply read-only UI mode when requested: disable all controls and hide timer UI
                 if (initData.readonly) {
                     try { el.pauseBtn.style.display = 'none'; } catch {}
                     try { el.timer.style.display = 'none'; } catch {}
                     try { const bar = document.querySelector('.askreport__progress'); if (bar) bar.setAttribute('style', 'display: none;'); } catch {}
                     disableAllInputs();
-                    // Also hide textarea caret by disabling it but keep visible
                     // Ensure no timer
                     stopTimer();
                 } else {
                     startTimer();
                 }
 
+                attachMarkdownLinkInterceptorOnce();
+
                 // Persist initial state after rendering
                 persistState();
-                // Intercept clicks on links to send openExternal
-                el.markdown.addEventListener('click', (e) => {
-                    const target = e.target;
-                    if (target && target.tagName === 'A') {
-                        e.preventDefault();
-                        const href = target.getAttribute('href') || '';
-                        if (href) {
-                            vscode.postMessage({ type: 'openExternal', url: href });
-                        }
-                    }
-                });
+            }
+
+            window.addEventListener('message', (event) => {
+                const msg = event.data;
+                if (!msg || msg.type !== 'init') return;
+                applyInit(msg.payload);
             });
 
-            // Restore state if any; triggers the same init handler
-            const saved = vscode.getState();
-            if (saved && saved.initData) {
-                window.postMessage({ type: 'init', payload: saved.initData }, '*');
+            // Bootstrap initial render from inlined payload (does not depend on extension-to-webview messaging timing)
+            const bootstrap = (typeof BOOTSTRAP !== 'undefined') ? BOOTSTRAP : undefined;
+            if (bootstrap) {
+                applyInit(bootstrap);
             }
 
             function persistState() {
@@ -567,11 +597,6 @@ export async function askReport(opts: AskReportOptions): Promise<AskUserResult> 
         </script>
     </body>
 </html>`
-
-    // Read timeout from settings and send init payload
-    const timeout = vscode.workspace
-        .getConfiguration('reliefpilot')
-        .get<number>('askReportTimeoutSeconds', 60)
 
     // Return a promise that resolves based on webview messages or panel disposal
     return await new Promise<AskUserResult>((resolve) => {
@@ -659,17 +684,6 @@ export async function askReport(opts: AskReportOptions): Promise<AskUserResult> 
             }),
         )
 
-        // Send init to the webview
-        void panel.webview.postMessage({
-            type: 'init',
-            payload: {
-                markdown: opts.markdown,
-                initialValue: opts.initialValue ?? '',
-                options: opts.predefinedOptions ?? [],
-                timeout: opts.readOnly ? 0 : timeout,
-                readonly: opts.readOnly === true,
-            },
-        })
     })
 }
 
@@ -802,4 +816,15 @@ function escapeHtml(input: string): string {
         .replace(/>/g, '&gt;')
         .replace(/"/g, '&quot;')
         .replace(/'/g, '&#039;')
+}
+
+function serializeForHtmlScriptTag(value: unknown): string {
+    // Escape characters that can break out of a <script> tag or change parsing semantics.
+    // Keep this minimal and deterministic: JSON + a few safe replacements.
+    return JSON.stringify(value)
+        .replace(/</g, '\\u003c')
+        .replace(/>/g, '\\u003e')
+        .replace(/&/g, '\\u0026')
+    .replace(/\u2028/g, '\\u2028')
+    .replace(/\u2029/g, '\\u2029')
 }
