@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.1 - 2026-01-25
+
+- fix(ask_report): inline bootstrap payload to prevent blank webview (#9)
+
 ## 0.4.0 - 2026-01-22
 
 - feat(ripgrep): add ripgrep language model tool for file searching
