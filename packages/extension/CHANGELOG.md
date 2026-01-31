@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.5.0 - 2026-01-31
+
+- feat(ai_fetch_url): add includeLinks option to preserve links in output
+
 ## 0.4.1 - 2026-01-25
 
 - fix(ask_report): inline bootstrap payload to prevent blank webview (#9)

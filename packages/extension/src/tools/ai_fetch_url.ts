@@ -16,6 +16,7 @@ import { statusBarActivity } from '../utils/statusBar';
 export type AiFetchUrlInput = {
     url: string;
     topic: string;
+    includeLinks?: boolean;
 };
 
 // Tool identifier used in logs and error envelopes
@@ -373,6 +374,7 @@ export class AiFetchUrlLanguageModelTool implements LanguageModelTool<AiFetchUrl
         try {
             const target = normalizeUrl(options.input?.url);
             const topic = normalizeTopic(options.input?.topic);
+            const includeLinks = options.input?.includeLinks === true;
             // Resolve model metadata once for this invocation so it can be shown in the progress panel header.
             // These values are treated as required for the ai_fetch_url workflow.
             if (!vscode.lm) {
@@ -453,7 +455,8 @@ export class AiFetchUrlLanguageModelTool implements LanguageModelTool<AiFetchUrl
                     const result = await convertToMarkdown(anchorCropped, {
                         extractContent: false,
                         includeImages: false,
-                        includeLinks: false,
+                        // Toggle link preservation explicitly; default stays false for better signal-to-noise.
+                        includeLinks,
                         includeMeta: false,
                         aggressiveCleanup: false,
                         maxLength: contentMaxLength,
@@ -499,6 +502,7 @@ export class AiFetchUrlLanguageModelTool implements LanguageModelTool<AiFetchUrl
         const { modelId } = this.getConfig();
         const url = options.input?.url ?? '<missing-url>';
         const topic = options.input?.topic ?? '<missing-topic>';
+        const includeLinks = options.input?.includeLinks === true;
         // Use MarkdownString with HTML support for richer, formatted content.
         // Allowed HTML is sanitized by VS Code (see markdownRenderer.ts). Only a safe subset is rendered.
         const md = new vscode.MarkdownString(undefined, true /* supportThemeIcons */);
@@ -512,7 +516,11 @@ export class AiFetchUrlLanguageModelTool implements LanguageModelTool<AiFetchUrl
         md.appendMarkdown(`Relief Pilot · **ai_fetch_url**\n`);
         md.appendMarkdown(`- Model: \`${modelId ?? '—'}\`  \n`);
         md.appendMarkdown(`- URL: ${url}  \n`);
-        md.appendMarkdown(`- Topic: \`${topic}\`\n\n`);
+        md.appendMarkdown(`- Topic: \`${topic}\`  \n`);
+        if (includeLinks) {
+            md.appendMarkdown(`- Include Links: \`true\`  \n`);
+        }
+        md.appendMarkdown('\n');
 
         // Generate UID and remember for invoke(); embed in command link
         const uid = randomUUID();

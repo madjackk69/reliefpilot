@@ -3,7 +3,7 @@
   "displayName": "Relief Pilot",
   "description": "A Swiss Army knife for AI agents in VS Code: safer tool calling, human-in-the-loop approvals, and smarter doc fetching to boost productivity and save you money.",
   "publisher": "ivan-mezentsev",
-  "version": "0.4.1",
+  "version": "0.5.0",
   "type": "commonjs",
   "icon": "icon.png",
   "categories": [
@@ -480,6 +480,10 @@
             "topic": {
               "type": "string",
               "description": "Describe in plain language the topic or key points the sub-agent must carefully filter for to conserve Your the context window."
+            },
+            "includeLinks": {
+              "type": "boolean",
+              "description": "If true, preserves links in the fetched/cleaned content. Warning: this usually adds a lot of noise, reduces effective context window, and can worsen extraction quality; enable only when you truly need links in the fetch result."
             }
           },
           "required": [
