@@ -1,0 +1,8 @@
+{
+  "name": "reliefpilot-workspace",
+  "private": true,
+  "packageManager": "pnpm@10.6.1",
+  "scripts": {
+    "clean": "node scripts/clean-repo.js"
+  }
+}
