@@ -200,10 +200,13 @@ export class FocusEditorLanguageModelTool implements LanguageModelTool<FocusEdit
         const md = new vscode.MarkdownString(undefined, true)
         md.supportHtml = true
         md.isTrusted = true
+        const showPauseButton = vscode.workspace
+            .getConfiguration('reliefpilot')
+            .get<boolean>('showPauseButtonInChat', true)
 
         const iconUri = vscode.Uri.joinPath(env.extensionUri, 'icon.png')
         md.appendMarkdown(`![Relief Pilot](${iconUri.toString()}|width=10,height=10) `)
-        md.appendMarkdown(`Relief Pilot · **focus_editor**\n`)
+        md.appendMarkdown(`Relief Pilot · **focus_editor**${showPauseButton ? ' [⏸](command:reliefpilot.haltForFeedback)' : ''}\n`)
         if (displayPath) md.appendMarkdown(`- File: \`${displayPath}\`  \n`)
         if (hasRange) {
             const sLn = Math.max(1, startLine!)

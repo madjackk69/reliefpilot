@@ -125,9 +125,12 @@ export class Context7GetLibraryDocsTool implements LanguageModelTool<Context7Get
         const md = new vscode.MarkdownString(undefined, true)
         md.supportHtml = true
         md.isTrusted = true
+        const showPauseButton = vscode.workspace
+            .getConfiguration('reliefpilot')
+            .get<boolean>('showPauseButtonInChat', true)
         const iconUri = vscode.Uri.joinPath(env.extensionUri, 'icon.png')
         md.appendMarkdown(`![Relief Pilot](${iconUri.toString()}|width=10,height=10) `)
-        md.appendMarkdown('Relief Pilot · **context7_get-library-docs**\n')
+        md.appendMarkdown(`Relief Pilot · **context7_get-library-docs**${showPauseButton ? ' [⏸](command:reliefpilot.haltForFeedback)' : ''}\n`)
         md.appendMarkdown(`- ID: \`${id}\`  \n`)
         if (topic) md.appendMarkdown(`- Topic: \`${topic}\`  \n`)
         if (typeof tokensVal === 'number') md.appendMarkdown(`- Tokens: \`${tokensVal}\`  \n`)

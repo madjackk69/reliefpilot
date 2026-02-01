@@ -305,6 +305,9 @@ export class ExecuteCommandLanguageModelTool implements LanguageModelTool<Execut
     const md = new vscode.MarkdownString(undefined, true)
     md.supportHtml = true
     md.isTrusted = true
+    const showPauseButton = vscode.workspace
+      .getConfiguration('reliefpilot')
+      .get<boolean>('showPauseButtonInChat', true)
 
     // Markdown rendering helpers (English-only comments per repo convention)
     const inlineCode = (value: string): string => {
@@ -327,7 +330,7 @@ export class ExecuteCommandLanguageModelTool implements LanguageModelTool<Execut
 
     const iconUri = vscode.Uri.joinPath(env.extensionUri, 'icon.png')
     md.appendMarkdown(`![Relief Pilot](${iconUri.toString()}|width=10,height=10) `)
-    md.appendMarkdown(`Relief Pilot · **execute_command**\n`)
+    md.appendMarkdown(`Relief Pilot · **execute_command**${showPauseButton ? ' [⏸](command:reliefpilot.haltForFeedback)' : ''}\n`)
 
     if (command) {
       md.appendMarkdown(`\n\n`)

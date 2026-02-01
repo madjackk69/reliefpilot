@@ -127,9 +127,12 @@ export class GithubGetLatestReleaseTool implements LanguageModelTool<GithubGetLa
         const md = new vscode.MarkdownString(undefined, true)
         md.supportHtml = true
         md.isTrusted = true
+        const showPauseButton = vscode.workspace
+            .getConfiguration('reliefpilot')
+            .get<boolean>('showPauseButtonInChat', true)
         const iconUri = vscode.Uri.joinPath(env.extensionUri, 'icon.png')
         md.appendMarkdown(`![Relief Pilot](${iconUri.toString()}|width=10,height=10) `)
-        md.appendMarkdown('Relief Pilot · **github_get_latest_release**\n')
+        md.appendMarkdown(`Relief Pilot · **github_get_latest_release**${showPauseButton ? ' [⏸](command:reliefpilot.haltForFeedback)' : ''}\n`)
         md.appendMarkdown(`- Repo: \`${owner}/${repo}\`  \n`)
         const uid = randomUUID()
         this._pendingUids.push(uid)

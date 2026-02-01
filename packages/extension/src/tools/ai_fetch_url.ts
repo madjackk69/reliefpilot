@@ -562,12 +562,15 @@ export class AiFetchUrlLanguageModelTool implements LanguageModelTool<AiFetchUrl
         const md = new vscode.MarkdownString(undefined, true /* supportThemeIcons */);
         md.supportHtml = true; // allow safe raw HTML (e.g., <span style="color:#fff;background-color:#000">)
         md.isTrusted = true;   // required so inline <span> is preserved by sanitizer
+        const showPauseButton = vscode.workspace
+            .getConfiguration('reliefpilot')
+            .get<boolean>('showPauseButtonInChat', true);
 
         const iconUri = vscode.Uri.joinPath(env.extensionUri, 'icon.png');
         md.appendMarkdown(`![Relief Pilot](${iconUri.toString()}|width=10,height=10) `);
 
         // Nicely formatted invocation info (title + details)
-        md.appendMarkdown(`Relief Pilot · **ai_fetch_url**\n`);
+        md.appendMarkdown(`Relief Pilot · **ai_fetch_url**${showPauseButton ? ' [⏸](command:reliefpilot.haltForFeedback)' : ''}\n`);
         md.appendMarkdown(`- Model: \`${modelId ?? '—'}\`  \n`);
         md.appendMarkdown(`- URL: ${url}  \n`);
         md.appendMarkdown(`- Topic: \`${topic}\`  \n`);

@@ -143,9 +143,12 @@ export class Context7ResolveLibraryIdTool implements LanguageModelTool<Context7R
         const md = new vscode.MarkdownString(undefined, true)
         md.supportHtml = true
         md.isTrusted = true
+        const showPauseButton = vscode.workspace
+            .getConfiguration('reliefpilot')
+            .get<boolean>('showPauseButtonInChat', true)
         const iconUri = vscode.Uri.joinPath(env.extensionUri, 'icon.png')
         md.appendMarkdown(`![Relief Pilot](${iconUri.toString()}|width=10,height=10) `)
-        md.appendMarkdown('Relief Pilot · **context7_resolve-library-id**\n')
+        md.appendMarkdown(`Relief Pilot · **context7_resolve-library-id**${showPauseButton ? ' [⏸](command:reliefpilot.haltForFeedback)' : ''}\n`)
         md.appendMarkdown(`- Query: \`${lib}\`  \n`)
         // Generate UID and embed show content command link
         const uid = randomUUID()

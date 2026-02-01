@@ -203,9 +203,12 @@ export class FeloSearchTool implements LanguageModelTool<FeloSearchInput> {
         const md = new vscode.MarkdownString(undefined, true)
         md.supportHtml = true
         md.isTrusted = true
+        const showPauseButton = vscode.workspace
+            .getConfiguration('reliefpilot')
+            .get<boolean>('showPauseButtonInChat', true)
         const iconUri = vscode.Uri.joinPath(env.extensionUri, 'icon.png')
         md.appendMarkdown(`![Relief Pilot](${iconUri.toString()}|width=10,height=10) `)
-        md.appendMarkdown('Relief Pilot · **felo_search**\n')
+        md.appendMarkdown(`Relief Pilot · **felo_search**${showPauseButton ? ' [⏸](command:reliefpilot.haltForFeedback)' : ''}\n`)
         md.appendMarkdown(`- Query: \`${q}\`  \n`)
 
         const uid = randomUUID()

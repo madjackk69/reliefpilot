@@ -111,6 +111,11 @@
           "default": false,
           "description": "If true, even commands marked as non-destructive (destructiveFlag=false) will require user confirmation."
         },
+        "reliefpilot.showPauseButtonInChat": {
+          "type": "boolean",
+          "default": true,
+          "description": "If true, shows a clickable pause icon (⏸) in tool invocation messages that triggers the Relief Pilot: Halt for Feedback command."
+        },
         "reliefpilot.AiFetchUrlModel": {
           "type": "string",
           "default": "oswe-vscode-prime",

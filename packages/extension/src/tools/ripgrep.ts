@@ -634,10 +634,13 @@ export class RipgrepLanguageModelTool implements LanguageModelTool<RipgrepInput>
     const md = new vscode.MarkdownString(undefined, true);
     md.supportHtml = true;
     md.isTrusted = true;
+    const showPauseButton = vscode.workspace
+      .getConfiguration('reliefpilot')
+      .get<boolean>('showPauseButtonInChat', true);
 
     const iconUri = vscode.Uri.joinPath(env.extensionUri, 'icon.png');
     md.appendMarkdown(`![Relief Pilot](${iconUri.toString()}|width=10,height=10) `);
-    md.appendMarkdown(`Relief Pilot · **ripgrep**\n`);
+    md.appendMarkdown(`Relief Pilot · **ripgrep**${showPauseButton ? ' [⏸](command:reliefpilot.haltForFeedback)' : ''}\n`);
     md.appendMarkdown(`- Pattern: \`${pattern}\`  \n`);
     md.appendMarkdown(`- CWD: \`${cwd}\`  \n`);
     if (paths.length > 0) {
