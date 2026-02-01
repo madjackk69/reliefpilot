@@ -11,6 +11,7 @@ import * as vscode from 'vscode';
 import { LanguageModelTextPart, LanguageModelToolResult } from 'vscode';
 import { createSession, finalizeSession, getSession } from '../utils/ai_fetch_sessions';
 import { env } from '../utils/env';
+import { haltForFeedbackController } from '../utils/haltForFeedbackController';
 import { statusBarActivity } from '../utils/statusBar';
 
 export type AiFetchUrlInput = {
@@ -414,6 +415,23 @@ export class AiFetchUrlLanguageModelTool implements LanguageModelTool<AiFetchUrl
             const subscription = token.onCancellationRequested(() => controller.abort());
 
             try {
+                // Halt for Feedback gating (checkpoint #1):
+                // Must happen immediately before the first network fetch.
+                let state = haltForFeedbackController.getSnapshot();
+                if (state.kind === 'paused') {
+                    state = await haltForFeedbackController.waitUntilNotPaused(token);
+                }
+
+                // Respect VS Code cancellation while waiting in paused state.
+                if (token.isCancellationRequested) {
+                    throw new Error('This operation was aborted');
+                }
+
+                if (state.kind === 'declined') {
+                    haltForFeedbackController.takeDeclineAndReset();
+                    throw new Error('Tool execution was declined by the user. Feedback: ' + state.feedback);
+                }
+
                 const response = await fetch(target, {
                     method: 'GET',
                     signal: controller.signal,
@@ -472,11 +490,47 @@ export class AiFetchUrlLanguageModelTool implements LanguageModelTool<AiFetchUrl
                 // Emit left-column content for any subscribed progress panel and buffer it
                 try { session.leftBuffer = processedText; session.leftEmitter.fire(processedText); } catch { /* ignore */ }
 
-                return await this.sendSuccess(processedText, target.toString(), topic, token, uid);
+                const result = await this.sendSuccess(processedText, target.toString(), topic, token, uid);
+
+                // Halt for Feedback gating (checkpoint #2):
+                // The user may pause/decline while the tool is processing the response.
+                // Gate right before returning the final tool result.
+                let finalState = haltForFeedbackController.getSnapshot();
+                if (finalState.kind === 'paused') {
+                    finalState = await haltForFeedbackController.waitUntilNotPaused(token);
+                }
+
+                if (token.isCancellationRequested) {
+                    throw new Error('This operation was aborted');
+                }
+
+                if (finalState.kind === 'declined') {
+                    haltForFeedbackController.takeDeclineAndReset();
+                    throw new Error('Tool execution was declined by the user. Feedback: ' + finalState.feedback);
+                }
+
+                return result;
             } finally {
                 subscription.dispose();
             }
         } catch (error) {
+            const raw = error instanceof Error ? error.message : String(error);
+
+            // Preserve exact error format for Halt for Feedback declines (no tool-specific prefix/envelope).
+            if (typeof raw === 'string' && raw.startsWith('Tool execution was declined by the user.')) {
+                if (session) {
+                    try {
+                        session.leftBuffer = raw;
+                        session.leftEmitter.fire(session.leftBuffer);
+                    } catch { /* ignore */ }
+                    try {
+                        finalizeSession(uid);
+                    } catch { /* ignore */ }
+                }
+
+                throw new Error(raw);
+            }
+
             const message = this.formatToolErrorMessage(error);
             if (session) {
                 // Surface the error in the progress panel (left column) and stop the stream timer.
