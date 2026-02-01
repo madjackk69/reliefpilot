@@ -10,6 +10,7 @@ import { z } from "zod"
 import { TerminalManager } from "../integrations/terminal/TerminalManager"
 import { ConfirmationUI } from "../utils/confirmation_ui"
 import { env } from "../utils/env"
+import { haltForFeedbackController } from "../utils/haltForFeedbackController"
 import { formatResponse, ToolResponse } from "../utils/response"
 import { statusBarActivity } from "../utils/statusBar"
 import { delay } from "../utils/time.js"
@@ -206,6 +207,15 @@ export async function executeCommandToolHandler(params: z.infer<typeof executeCo
     }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
+
+    // Preserve exact error format for Halt for Feedback declines
+    if (typeof message === "string" && message.startsWith("Tool execution was declined by the user.")) {
+      return {
+        isError: true,
+        content: [{ text: message }],
+      }
+    }
+
     return {
       isError: true,
       content: [{ text: `execute_command failed: ${message}` }],
@@ -218,11 +228,27 @@ export type ExecuteCommandInput = z.infer<typeof executeCommandSchema>
 export class ExecuteCommandLanguageModelTool implements LanguageModelTool<ExecuteCommandInput> {
   async invoke(
     options: LanguageModelToolInvocationOptions<ExecuteCommandInput>,
-    _token: CancellationToken,
+    token: CancellationToken,
   ): Promise<vscode.LanguageModelToolResult> {
-    // Indicate activity in the status bar while this tool runs
     statusBarActivity.start('execute_command')
     try {
+      // Halt for Feedback gating: must happen before any confirmation UI and before terminal initialization.
+      let state = haltForFeedbackController.getSnapshot()
+      if (state.kind === 'paused') {
+        state = await haltForFeedbackController.waitUntilNotPaused(token)
+      }
+
+      // Respect VS Code cancellation while waiting in paused state.
+      if (token.isCancellationRequested) {
+        // Keep current tool contract on cancellation.
+        throw new Error('This operation was aborted')
+      }
+
+      if (state.kind === 'declined') {
+        haltForFeedbackController.takeDeclineAndReset()
+        throw new Error('Tool execution was declined by the user. Feedback: ' + state.feedback)
+      }
+
       const parseResult = await executeCommandSchema.safeParseAsync(options.input ?? {})
 
       if (!parseResult.success) {
@@ -233,6 +259,23 @@ export class ExecuteCommandLanguageModelTool implements LanguageModelTool<Execut
       const messages = (result.content ?? [])
         .map((part) => ("text" in part ? part.text : undefined))
         .filter((text): text is string => typeof text === "string" && text.length > 0)
+
+      // Halt for Feedback gating (second checkpoint):
+      // the command may have been running while the user paused/declined.
+      // Gate right before returning/throwing the final tool result.
+      let finalState = haltForFeedbackController.getSnapshot()
+      if (finalState.kind === 'paused') {
+        finalState = await haltForFeedbackController.waitUntilNotPaused(token)
+      }
+
+      if (token.isCancellationRequested) {
+        throw new Error('This operation was aborted')
+      }
+
+      if (finalState.kind === 'declined') {
+        haltForFeedbackController.takeDeclineAndReset()
+        throw new Error('Tool execution was declined by the user. Feedback: ' + finalState.feedback)
+      }
 
       if (result.isError) {
         const message = messages[0] ?? "execute_command failed."

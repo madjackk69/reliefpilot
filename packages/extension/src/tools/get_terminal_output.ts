@@ -10,6 +10,7 @@ import { z } from "zod"
 import { stripAnsi } from "../integrations/terminal/ansiUtils.js"
 import { TerminalRegistry } from "../integrations/terminal/TerminalRegistry"
 import { env } from "../utils/env"
+import { haltForFeedbackController } from "../utils/haltForFeedbackController"
 import { formatResponse, ToolResponse } from "../utils/response"
 import { statusBarActivity } from "../utils/statusBar"
 
@@ -161,17 +162,35 @@ export type GetTerminalOutputInput = z.infer<typeof getTerminalOutputSchema>
 export class GetTerminalOutputLanguageModelTool implements LanguageModelTool<GetTerminalOutputInput> {
   async invoke(
     options: LanguageModelToolInvocationOptions<GetTerminalOutputInput>,
-    _token: CancellationToken,
+    token: CancellationToken,
   ): Promise<vscode.LanguageModelToolResult> {
     statusBarActivity.start('get_terminal_output')
     try {
+      // Halt for Feedback gating: must happen before any terminal focus/clipboard/commands.
+      let state = haltForFeedbackController.getSnapshot()
+      if (state.kind === 'paused') {
+        state = await haltForFeedbackController.waitUntilNotPaused(token)
+      }
+
+      // Keep current tool contract on cancellation.
+      if (token.isCancellationRequested) {
+        return new vscode.LanguageModelToolResult([
+          new vscode.LanguageModelTextPart("Operation cancelled."),
+        ])
+      }
+
+      if (state.kind === 'declined') {
+        haltForFeedbackController.takeDeclineAndReset()
+        throw new Error('Tool execution was declined by the user. Feedback: ' + state.feedback)
+      }
+
       const parseResult = await getTerminalOutputSchema.safeParseAsync(options.input ?? {})
 
       if (!parseResult.success) {
         throw new Error(`get_terminal_output invalid arguments: ${parseResult.error.message}`)
       }
 
-      const result = await getTerminalOutputToolHandler(parseResult.data, _token)
+      const result = await getTerminalOutputToolHandler(parseResult.data, token)
       const messages = (result.content ?? [])
         .map((part) => ("text" in part ? part.text : undefined))
         .filter((text): text is string => typeof text === "string" && text.length > 0)
