@@ -195,6 +195,16 @@ export async function openOrFocusHaltForFeedback(): Promise<void> {
 
     const disposables: vscode.Disposable[] = []
 
+    // If the global state is changed externally (e.g. a tool resets paused -> running),
+    // keep the Halt for Feedback panel in sync by closing it when it is no longer paused.
+    disposables.push(
+      haltForFeedbackController.onDidChangeState((snapshot) => {
+        if (snapshot.kind !== 'paused') {
+          try { panel.dispose() } catch { /* ignore */ }
+        }
+      }),
+    )
+
     disposables.push(
         panel.webview.onDidReceiveMessage((msg: any) => {
             if (!msg || typeof msg !== 'object') return
