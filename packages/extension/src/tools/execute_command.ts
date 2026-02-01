@@ -263,14 +263,39 @@ export class ExecuteCommandLanguageModelTool implements LanguageModelTool<Execut
     md.supportHtml = true
     md.isTrusted = true
 
+    // Markdown rendering helpers (English-only comments per repo convention)
+    const inlineCode = (value: string): string => {
+      const tickRuns = value.match(/`+/g) ?? []
+      const maxTicks = tickRuns.reduce((m, run) => Math.max(m, run.length), 0)
+      const fence = "`".repeat(Math.max(1, maxTicks + 1))
+      // Inline code cannot contain newlines reliably; fall back to a fenced block upstream for multiline values.
+      const content = value.startsWith(" ") || value.endsWith(" ") ? ` ${value} ` : value
+      return `${fence}${content}${fence}`
+    }
+
+    const fencedCodeBlock = (code: string, language: string): string => {
+      const tickRuns = code.match(/`+/g) ?? []
+      const maxTicks = tickRuns.reduce((m, run) => Math.max(m, run.length), 0)
+      const fence = "`".repeat(Math.max(3, maxTicks + 1))
+      // Ensure trailing newline for consistent rendering in VS Code markdown.
+      const normalized = code.endsWith("\n") ? code : code + "\n"
+      return `${fence}${language}\n${normalized}${fence}\n`
+    }
+
     const iconUri = vscode.Uri.joinPath(env.extensionUri, 'icon.png')
     md.appendMarkdown(`![Relief Pilot](${iconUri.toString()}|width=10,height=10) `)
     md.appendMarkdown(`Relief Pilot · **execute_command**\n`)
-    if (command) md.appendMarkdown(`- Command: \`${command}\`  \n`)
-    if (customCwd) md.appendMarkdown(`- CWD: \`${customCwd}\`  \n`)
-    if (typeof destructiveFlag === "boolean") md.appendMarkdown(`- Destructive: \`${destructiveFlag}\`  \n`)
-    if (typeof background === "boolean") md.appendMarkdown(`- Background: \`${background}\`  \n`)
-    if (typeof timeout === "number") md.appendMarkdown(`- Timeout: \`${timeout}ms\`  \n`)
+
+    if (command) {
+      md.appendMarkdown(`\n\n`)
+      md.appendMarkdown(fencedCodeBlock(command, "sh"))
+    }
+
+    // Keep remaining fields compact; these are single-line values.
+    if (customCwd) md.appendMarkdown(`- CWD: ${inlineCode(customCwd)}  \n`)
+    if (typeof destructiveFlag === "boolean") md.appendMarkdown(`- Destructive: ${inlineCode(String(destructiveFlag))}  \n`)
+    if (typeof background === "boolean") md.appendMarkdown(`- Background: ${inlineCode(String(background))}  \n`)
+    if (typeof timeout === "number") md.appendMarkdown(`- Timeout: ${inlineCode(`${timeout}ms`)}  \n`)
 
     return { invocationMessage: md }
   }
