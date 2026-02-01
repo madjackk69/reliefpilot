@@ -23,6 +23,20 @@ Can you check the docs and explain how the project works? #ask_report
 
 ![execute_command](https://github.com/ivan-mezentsev/reliefpilot/raw/master/docs/demo-execute_command.gif)
 
+### Halt for Feedback
+
+- Pause tool execution globally and put Copilot interactions on hold while you decide what to do next.
+- Open it from the Command Palette: `Relief Pilot: Halt for Feedback` (also available as the first item in the status bar menu).
+- While paused, any Relief Pilot tool invocation will wait until you resume.
+- Click **Resume work** to continue normal execution.
+- Click **Send feedback** to cancel the current tool execution with a reason (the button is disabled until the input contains non-whitespace text).
+
+If a tool execution is declined, the error message will include your feedback:
+
+```text
+Error: Tool execution was declined by the user. Feedback: <TEXT>
+```
+
 ### AI Fetch URL
 
 - The AI agent can fetch documentation in Markdown format, extracting content strictly by topic to save your context window — an alternative to RAG using Language Model APIs. Keep in mind that "thinking" models take longer per request (Time vs. Your Agent's Context Window Size), so we use any model without hallucinations and at zero cost per request.
