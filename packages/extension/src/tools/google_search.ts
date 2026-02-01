@@ -10,6 +10,7 @@ import * as vscode from 'vscode'
 import { env } from '../utils/env'
 import { getGoogleApiKey, getGoogleSearchEngineId } from '../utils/google_search_auth'
 import { createGoogleContentSession, finalizeGoogleSession } from '../utils/google_search_content_sessions'
+import { haltForFeedbackController } from '../utils/haltForFeedbackController'
 import { statusBarActivity } from '../utils/statusBar'
 import { validateGoogleTokensFromResponse } from '../utils/validate_google_tokens'
 
@@ -215,6 +216,23 @@ export class GoogleSearchTool implements LanguageModelTool<GoogleSearchInput> {
         const session = createGoogleContentSession(uid, 'google_search')
 
         try {
+            // Halt for Feedback integration: gate before any network requests.
+            let haltState = haltForFeedbackController.getSnapshot()
+            if (haltState.kind === 'paused') {
+                haltState = await haltForFeedbackController.waitUntilNotPaused(token)
+            }
+
+            // Respect VS Code cancellation while waiting in paused state.
+            if (token.isCancellationRequested) {
+                throw new Error('Cancelled')
+            }
+
+            if (haltState.kind === 'declined') {
+                // Reset global state back to running and throw exact error message.
+                haltForFeedbackController.takeDeclineAndReset()
+                throw new Error('Tool execution was declined by the user. Feedback: ' + haltState.feedback)
+            }
+
             const input = options.input ?? ({} as GoogleSearchInput)
             const query = normalizeQuery(input.query)
             const page = normalizePage(input.page)
@@ -243,6 +261,12 @@ export class GoogleSearchTool implements LanguageModelTool<GoogleSearchInput> {
             const errorBody = `google_search error: ${message}`
             session.contentBuffer = errorBody
             try { session.contentEmitter.fire(session.contentBuffer) } catch { }
+
+            if (typeof message === 'string' && message.startsWith('Tool execution was declined by the user.')) {
+                // Preserve exact error format
+                throw new Error(message)
+            }
+
             throw err instanceof Error ? err : new Error(message)
         } finally {
             finalizeGoogleSession(uid)
