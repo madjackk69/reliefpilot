@@ -131,6 +131,10 @@ Error: Tool execution was declined by the user. Feedback: <TEXT>
         - ripgrep: { pattern: "registerEvent", paths: ["references/obsidian-developer-docs/en"], caseMode: "smart", glob: ["*.md"], contextLines: 0 }
    - ALLOWED: `file_search` is permitted ONLY to discover filenames/paths. It must NEVER be used when an absolute path is already known.
 
+   ## Tool Error Interpretation
+
+   - HARDMUST: Upon seeing `Error: Tool execution was declined by the user. Feedback: <TEXT>` from any tool, the agent must treat it as an explicit user cancellation and instantly adjust its execution strategy in strict alignment with the feedback text. BLOCKER.
+
    ## Terminal Analysis
 
    - **CRITICAL**: MUST always read and analyze complete terminal output, not just exit code
