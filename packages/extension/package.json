@@ -3,7 +3,7 @@
   "displayName": "Relief Pilot",
   "description": "A Swiss Army knife for AI agents in VS Code: safer tool calling, human-in-the-loop approvals, and smarter doc fetching to boost productivity and save you money.",
   "publisher": "ivan-mezentsev",
-  "version": "0.5.1",
+  "version": "0.6.0",
   "type": "commonjs",
   "icon": "icon.png",
   "categories": [
@@ -17,6 +17,7 @@
     "github copilot",
     "copilot chat",
     "copilot agent",
+    "copilot pause",
     "agent mode",
     "ai",
     "llm",
@@ -93,6 +94,11 @@
         "category": "Relief Pilot"
       },
       {
+        "command": "reliefpilot.haltForFeedback",
+        "title": "Relief Pilot: Halt for Feedback",
+        "category": "Relief Pilot"
+      },
+      {
         "command": "reliefpilot.askReport.showHistory",
         "title": "Relief Pilot: Show `Ask Report` History",
         "category": "Relief Pilot"
@@ -105,6 +111,11 @@
           "type": "boolean",
           "default": false,
           "description": "If true, even commands marked as non-destructive (destructiveFlag=false) will require user confirmation."
+        },
+        "reliefpilot.showPauseButtonInChat": {
+          "type": "boolean",
+          "default": true,
+          "description": "If true, shows a clickable pause icon (⏸) in tool invocation messages that triggers the Relief Pilot: Halt for Feedback command."
         },
         "reliefpilot.AiFetchUrlModel": {
           "type": "string",

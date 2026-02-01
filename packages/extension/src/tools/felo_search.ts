@@ -9,6 +9,7 @@ import type {
 import * as vscode from 'vscode'
 import { env } from '../utils/env'
 import { createFeloContentSession, finalizeFeloSession } from '../utils/felo_search_content_sessions'
+import { haltForFeedbackController } from '../utils/haltForFeedbackController'
 import { statusBarActivity } from '../utils/statusBar'
 
 export interface FeloSearchInput {
@@ -152,6 +153,23 @@ export class FeloSearchTool implements LanguageModelTool<FeloSearchInput> {
         const uid = this._pendingUids.length > 0 ? this._pendingUids.shift()! : randomUUID()
         const session = createFeloContentSession(uid, 'felo_search')
         try {
+            // Halt for Feedback integration: gate before any network requests.
+            let haltState = haltForFeedbackController.getSnapshot()
+            if (haltState.kind === 'paused') {
+                haltState = await haltForFeedbackController.waitUntilNotPaused(token)
+            }
+
+            // Respect VS Code cancellation while waiting in paused state.
+            if (token.isCancellationRequested) {
+                throw new Error('Cancelled')
+            }
+
+            if (haltState.kind === 'declined') {
+                // Reset global state back to running and throw exact error message.
+                haltForFeedbackController.takeDeclineAndReset()
+                throw new Error('Tool execution was declined by the user. Feedback: ' + haltState.feedback)
+            }
+
             const input = options.input ?? ({} as FeloSearchInput)
             const answer = await performFeloSearch(input, token, session)
             const body = answer
@@ -163,6 +181,12 @@ export class FeloSearchTool implements LanguageModelTool<FeloSearchInput> {
             const errorBody = `felo_search error: ${message}`
             session.contentBuffer = errorBody
             try { session.contentEmitter.fire(session.contentBuffer) } catch { }
+
+            if (typeof message === 'string' && message.startsWith('Tool execution was declined by the user.')) {
+                // Preserve exact error format
+                throw new Error(message)
+            }
+
             throw err instanceof Error ? err : new Error(message)
         } finally {
             finalizeFeloSession(uid)
@@ -179,9 +203,12 @@ export class FeloSearchTool implements LanguageModelTool<FeloSearchInput> {
         const md = new vscode.MarkdownString(undefined, true)
         md.supportHtml = true
         md.isTrusted = true
+        const showPauseButton = vscode.workspace
+            .getConfiguration('reliefpilot')
+            .get<boolean>('showPauseButtonInChat', true)
         const iconUri = vscode.Uri.joinPath(env.extensionUri, 'icon.png')
         md.appendMarkdown(`![Relief Pilot](${iconUri.toString()}|width=10,height=10) `)
-        md.appendMarkdown('Relief Pilot · **felo_search**\n')
+        md.appendMarkdown(`Relief Pilot · **felo_search**${showPauseButton ? ' [⏸](command:reliefpilot.haltForFeedback)' : ''}\n`)
         md.appendMarkdown(`- Query: \`${q}\`  \n`)
 
         const uid = randomUUID()

@@ -9,6 +9,7 @@ import type {
 import * as vscode from 'vscode';
 import { z } from 'zod';
 import { env } from '../utils/env';
+import { haltForFeedbackController } from '../utils/haltForFeedbackController';
 import { statusBarActivity } from '../utils/statusBar';
 
 const TOOL_NAME = 'ripgrep';
@@ -274,6 +275,39 @@ const runRipgrep = async (
   let exitSignal: NodeJS.Signals | null | undefined;
 
   let killRequested = false;
+
+  // Halt for Feedback integration: wait here before any process spawn.
+  // This is intentionally placed immediately before spawn('rg', ...).
+  let haltState = haltForFeedbackController.getSnapshot();
+  if (haltState.kind === 'paused') {
+    haltState = await haltForFeedbackController.waitUntilNotPaused(token);
+  }
+
+  // Respect VS Code cancellation while waiting in paused state.
+  if (token.isCancellationRequested) {
+    return {
+      tool: 'ripgrep',
+      detail: input.detail,
+      found: false,
+      cancelled: true,
+      timedOut: false,
+      truncated: false,
+      limits: {
+        maxMatches: input.maxMatches,
+        maxFiles: input.maxFiles,
+        maxOutputChars: input.maxOutputChars,
+        timeoutMs: input.timeoutMs,
+      },
+      summary: { filesWithMatches: 0, matchCount: 0, elapsed: null },
+      files: input.detail === 'files' ? [] : undefined,
+    };
+  }
+
+  if (haltState.kind === 'declined') {
+    // Reset global state back to running and throw exact error message.
+    haltForFeedbackController.takeDeclineAndReset();
+    throw new Error(`Tool execution was declined by the user. Feedback: ${haltState.feedback}`);
+  }
 
   const child = spawn('rg', args, {
     cwd,
@@ -572,6 +606,10 @@ export class RipgrepLanguageModelTool implements LanguageModelTool<RipgrepInput>
       return new vscode.LanguageModelToolResult([new vscode.LanguageModelTextPart(payload)]);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
+      if (typeof message === 'string' && message.startsWith('Tool execution was declined by the user.')) {
+        // Preserve exact error format
+        throw new Error(message);
+      }
       throw new Error(`${TOOL_NAME} error: ${message}`);
     } finally {
       statusBarActivity.end(TOOL_NAME);
@@ -596,10 +634,13 @@ export class RipgrepLanguageModelTool implements LanguageModelTool<RipgrepInput>
     const md = new vscode.MarkdownString(undefined, true);
     md.supportHtml = true;
     md.isTrusted = true;
+    const showPauseButton = vscode.workspace
+      .getConfiguration('reliefpilot')
+      .get<boolean>('showPauseButtonInChat', true);
 
     const iconUri = vscode.Uri.joinPath(env.extensionUri, 'icon.png');
     md.appendMarkdown(`![Relief Pilot](${iconUri.toString()}|width=10,height=10) `);
-    md.appendMarkdown(`Relief Pilot · **ripgrep**\n`);
+    md.appendMarkdown(`Relief Pilot · **ripgrep**${showPauseButton ? ' [⏸](command:reliefpilot.haltForFeedback)' : ''}\n`);
     md.appendMarkdown(`- Pattern: \`${pattern}\`  \n`);
     md.appendMarkdown(`- CWD: \`${cwd}\`  \n`);
     if (paths.length > 0) {

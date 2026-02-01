@@ -1,4 +1,5 @@
 import * as vscode from 'vscode'
+import { haltForFeedbackController } from './haltForFeedbackController'
 
 // Centralized status bar activity tracker for the extension.
 // Tracks concurrent tool invocations and toggles spinner/robot icon accordingly.
@@ -7,6 +8,7 @@ class StatusBarActivityTracker {
     private readonly label: string
     private activeCount = 0
     private readonly sources = new Map<string, number>()
+    private haltStateDisposable: vscode.Disposable | undefined
 
     constructor(label: string = 'Relief Pilot') {
         this.label = label
@@ -15,6 +17,9 @@ class StatusBarActivityTracker {
     // Initialize tracker with the created StatusBarItem
     init(item: vscode.StatusBarItem) {
         this.item = item
+        // Re-render when Halt for Feedback state changes
+        try { this.haltStateDisposable?.dispose() } catch { /* noop */ }
+        this.haltStateDisposable = haltForFeedbackController.onDidChangeState(() => this.update())
         this.update()
     }
 
@@ -45,8 +50,17 @@ class StatusBarActivityTracker {
         if (!this.item) return
 
         const isBusy = this.activeCount > 0
-        // Use VS Code codicon spinner when busy; custom ReliefPilot logo otherwise; always show short label next to icon
-        this.item.text = `${isBusy ? '$(sync~spin)' : '$(reliefpilot-logo)'} RP`
+        const haltState = haltForFeedbackController.getSnapshot()
+        if (haltState.kind === 'paused') {
+            // Show pause indicator to the left of extension icon
+            this.item.text = '$(debug-pause) $(reliefpilot-logo) RP'
+        } else if (haltState.kind === 'declined') {
+            // Show feedback indicator to the left of extension icon
+            this.item.text = '$(send) $(reliefpilot-logo) RP'
+        } else {
+            // Use VS Code codicon spinner when busy; custom ReliefPilot logo otherwise; always show short label next to icon
+            this.item.text = `${isBusy ? '$(sync~spin)' : '$(reliefpilot-logo)'} RP`
+        }
 
         // Compose tooltip with brief activity summary
         if (isBusy) {

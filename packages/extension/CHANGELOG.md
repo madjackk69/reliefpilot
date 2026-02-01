@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.6.0 - 2026-02-01
+
+- feat(haltForFeedback): implement halt for feedback functionality
+
 ## 0.5.1 - 2026-02-01
 
 - fix(execute_command): enhance markdown rendering for command output

@@ -8,6 +8,7 @@ import type {
 import * as vscode from 'vscode'
 import { z } from 'zod'
 import { env } from '../utils/env'
+import { haltForFeedbackController } from '../utils/haltForFeedbackController'
 import { statusBarActivity } from '../utils/statusBar'
 
 // Zod schema consistent with other tools
@@ -125,10 +126,26 @@ export type FocusEditorInput = z.infer<typeof focusEditorSchema>;
 export class FocusEditorLanguageModelTool implements LanguageModelTool<FocusEditorInput> {
     async invoke(
         options: LanguageModelToolInvocationOptions<FocusEditorInput>,
-        _token: CancellationToken,
+        token: CancellationToken,
     ): Promise<vscode.LanguageModelToolResult> {
         statusBarActivity.start('focus_editor')
         try {
+            // Halt for Feedback integration: gate before any editor focus/open actions.
+            let state = haltForFeedbackController.getSnapshot()
+            if (state.kind === 'paused') {
+                state = await haltForFeedbackController.waitUntilNotPaused(token)
+                // Respect VS Code cancellation while waiting in paused state.
+                if (token.isCancellationRequested) {
+                    // Keep current tool contract on cancellation.
+                    throw new Error('This operation was aborted')
+                }
+            }
+
+            if (state.kind === 'declined') {
+                haltForFeedbackController.takeDeclineAndReset()
+                throw new Error('Tool execution was declined by the user. Feedback: ' + state.feedback)
+            }
+
             const parseResult = await focusEditorSchema.safeParseAsync(
                 options.input ?? {},
             )
@@ -183,10 +200,13 @@ export class FocusEditorLanguageModelTool implements LanguageModelTool<FocusEdit
         const md = new vscode.MarkdownString(undefined, true)
         md.supportHtml = true
         md.isTrusted = true
+        const showPauseButton = vscode.workspace
+            .getConfiguration('reliefpilot')
+            .get<boolean>('showPauseButtonInChat', true)
 
         const iconUri = vscode.Uri.joinPath(env.extensionUri, 'icon.png')
         md.appendMarkdown(`![Relief Pilot](${iconUri.toString()}|width=10,height=10) `)
-        md.appendMarkdown(`Relief Pilot · **focus_editor**\n`)
+        md.appendMarkdown(`Relief Pilot · **focus_editor**${showPauseButton ? ' [⏸](command:reliefpilot.haltForFeedback)' : ''}\n`)
         if (displayPath) md.appendMarkdown(`- File: \`${displayPath}\`  \n`)
         if (hasRange) {
             const sLn = Math.max(1, startLine!)

@@ -9,6 +9,7 @@ import type {
 import * as vscode from 'vscode'
 import { createDuckDuckGoContentSession, finalizeDuckDuckGoSession } from '../utils/duckduckgo_search_content_sessions'
 import { env } from '../utils/env'
+import { haltForFeedbackController } from '../utils/haltForFeedbackController'
 import { statusBarActivity } from '../utils/statusBar'
 
 export interface DuckDuckGoSearchInput {
@@ -186,6 +187,23 @@ export class DuckDuckGoSearchTool implements LanguageModelTool<DuckDuckGoSearchI
         const uid = this._pendingUids.length > 0 ? this._pendingUids.shift()! : randomUUID()
         const session = createDuckDuckGoContentSession(uid, 'duckduckgo_search')
         try {
+            // Halt for Feedback integration: gate before any long waits/network requests.
+            let haltState = haltForFeedbackController.getSnapshot()
+            if (haltState.kind === 'paused') {
+                haltState = await haltForFeedbackController.waitUntilNotPaused(token)
+            }
+
+            // Respect VS Code cancellation while waiting in paused state.
+            if (token.isCancellationRequested) {
+                throw new Error('Cancelled')
+            }
+
+            if (haltState.kind === 'declined') {
+                // Reset global state back to running and throw exact error message.
+                haltForFeedbackController.takeDeclineAndReset()
+                throw new Error('Tool execution was declined by the user. Feedback: ' + haltState.feedback)
+            }
+
             const input = options.input ?? ({} as DuckDuckGoSearchInput)
             const query = normalizeQuery(input.query)
             const page = normalizePage(input.page)
@@ -201,6 +219,12 @@ export class DuckDuckGoSearchTool implements LanguageModelTool<DuckDuckGoSearchI
             const errorBody = `duckduckgo_search error: ${message}`
             session.contentBuffer = errorBody
             try { session.contentEmitter.fire(session.contentBuffer) } catch { }
+
+            if (typeof message === 'string' && message.startsWith('Tool execution was declined by the user.')) {
+                // Preserve exact error format
+                throw new Error(message)
+            }
+
             throw err instanceof Error ? err : new Error(message)
         } finally {
             finalizeDuckDuckGoSession(uid)
@@ -215,9 +239,12 @@ export class DuckDuckGoSearchTool implements LanguageModelTool<DuckDuckGoSearchI
         const numResults = input.numResults
         const md = new vscode.MarkdownString(undefined, true)
         md.supportHtml = true; md.isTrusted = true
+        const showPauseButton = vscode.workspace
+            .getConfiguration('reliefpilot')
+            .get<boolean>('showPauseButtonInChat', true)
         const iconUri = vscode.Uri.joinPath(env.extensionUri, 'icon.png')
         md.appendMarkdown(`![Relief Pilot](${iconUri.toString()}|width=10,height=10) `)
-        md.appendMarkdown('Relief Pilot · **duckduckgo_search**\n')
+        md.appendMarkdown(`Relief Pilot · **duckduckgo_search**${showPauseButton ? ' [⏸](command:reliefpilot.haltForFeedback)' : ''}\n`)
         md.appendMarkdown(`- Query: \`${q}\`  \n`)
         if (typeof page === 'number') md.appendMarkdown(`- Page: \`${page}\`  \n`)
         if (typeof numResults === 'number') md.appendMarkdown(`- Num Results: \`${numResults}\`  \n`)
