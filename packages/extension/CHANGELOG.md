@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.5.1 - 2026-02-01
+
+- fix(execute_command): enhance markdown rendering for command output
+
 ## 0.5.0 - 2026-01-31
 
 - feat(ai_fetch_url): add includeLinks option to preserve links in output
