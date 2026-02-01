@@ -10,6 +10,7 @@ import * as vscode from 'vscode'
 import { fetchContext7 } from '../utils/context7_auth'
 import { createContext7ContentSession, finalizeContext7Session } from '../utils/context7_content_sessions'
 import { env } from '../utils/env'
+import { haltForFeedbackController } from '../utils/haltForFeedbackController'
 import { statusBarActivity } from '../utils/statusBar'
 
 // Input shape for context7_resolve-library-id
@@ -86,6 +87,23 @@ export class Context7ResolveLibraryIdTool implements LanguageModelTool<Context7R
     ): Promise<vscode.LanguageModelToolResult> {
         // Spinner is started in prepareInvocation to indicate activity from the very beginning
         try {
+            // Halt for Feedback integration: gate before any network requests or heavy work.
+            let state = haltForFeedbackController.getSnapshot()
+            if (state.kind === 'paused') {
+                state = await haltForFeedbackController.waitUntilNotPaused(token)
+            }
+
+            // Respect VS Code cancellation while waiting in paused state.
+            if (token.isCancellationRequested) {
+                // Keep current tool contract on cancellation: throw and let the existing catch format it.
+                throw new Error('This operation was aborted')
+            }
+
+            if (state.kind === 'declined') {
+                haltForFeedbackController.takeDeclineAndReset()
+                throw new Error('Tool execution was declined by the user. Feedback: ' + state.feedback)
+            }
+
             const name = normalizeLibraryName(options.input?.libraryName)
             const resp = await searchLibraries(name, token)
             if (!resp) {
@@ -103,6 +121,10 @@ export class Context7ResolveLibraryIdTool implements LanguageModelTool<Context7R
             return new vscode.LanguageModelToolResult([new vscode.LanguageModelTextPart(prefix)])
         } catch (err) {
             const message = err instanceof Error ? err.message : String(err)
+            if (typeof message === 'string' && message.startsWith('Tool execution was declined by the user.')) {
+                // Preserve exact error format
+                throw new Error(message)
+            }
             return new vscode.LanguageModelToolResult([
                 new vscode.LanguageModelTextPart(`context7_resolve-library-id error: ${message}`),
             ])
