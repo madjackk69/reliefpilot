@@ -10,6 +10,7 @@ import { ExecuteCommandLanguageModelTool } from './tools/execute_command';
 import { FeloSearchTool } from './tools/felo_search';
 import { FocusEditorLanguageModelTool } from './tools/focus_editor';
 import { GetTerminalOutputLanguageModelTool } from './tools/get_terminal_output';
+import { openOrFocusHaltForFeedback } from './tools/halt_for_feedback';
 import { RipgrepLanguageModelTool } from './tools/ripgrep';
 import { GithubGetDirectoryContentsTool } from './tools/github_get_directory_contents';
 import { GithubGetFileContentsTool } from './tools/github_get_file_contents';
@@ -44,6 +45,7 @@ import { statusBarActivity } from './utils/statusBar';
 
 const STATUS_MENU_COMMAND = 'reliefpilot.status.menu';
 const SHOW_ASK_REPORT_HISTORY_COMMAND = 'reliefpilot.askReport.showHistory';
+const HALT_FOR_FEEDBACK_COMMAND = 'reliefpilot.haltForFeedback';
 const SELECT_AI_FETCH_URL_MODEL_LABEL = 'Select Model for `ai_fetch_url`';
 
 const extensionDisplayName = 'Relief Pilot';
@@ -87,6 +89,10 @@ async function showReliefPilotMenu() {
     : 'Setup API-token `GOOGLE_SEARCH_ENGINE_ID`';
 
   const items: vscode.QuickPickItem[] = [
+    {
+      label: 'Halt for Feedback',
+      description: 'Pause tool execution and optionally send feedback',
+    },
     {
       label: 'Relief Pilot Settings',
       description: 'Open VS Code Settings filtered by @reliefpilot',
@@ -134,6 +140,8 @@ async function showReliefPilotMenu() {
       const message = err instanceof Error ? err.message : String(err);
       vscode.window.showErrorMessage(`Failed to open settings: ${message}`);
     }
+  } else if (pick.label === 'Halt for Feedback') {
+    await vscode.commands.executeCommand(HALT_FOR_FEEDBACK_COMMAND);
   } else if (pick.label === SELECT_AI_FETCH_URL_MODEL_LABEL) {
     await selectModelForAiFetchUrl();
   } else if (pick.label === historyMenuLabel || pick.label.startsWith('History "ask_report"')) {
@@ -615,6 +623,7 @@ export const activate = async (context: vscode.ExtensionContext) => {
   // Register command that the status bar item invokes to show the Relief Pilot menu
   context.subscriptions.push(
     vscode.commands.registerCommand(STATUS_MENU_COMMAND, () => showReliefPilotMenu()),
+    vscode.commands.registerCommand(HALT_FOR_FEEDBACK_COMMAND, async () => openOrFocusHaltForFeedback()),
     // Public command to open ask_report history menu (bindable to keybindings)
     vscode.commands.registerCommand(SHOW_ASK_REPORT_HISTORY_COMMAND, () => showAskReportHistoryMenu()),
     // Internal command (not contributed) for possible programmatic usage/tests
