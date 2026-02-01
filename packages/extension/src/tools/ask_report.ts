@@ -9,6 +9,7 @@ import type {
 import * as vscode from 'vscode'
 import { askReportHistory } from '../utils/ask_report_history'
 import { env } from '../utils/env'
+import { haltForFeedbackController } from '../utils/haltForFeedbackController'
 import { statusBarActivity } from '../utils/statusBar'
 
 // Types for ask_report tool API
@@ -24,6 +25,14 @@ export type AskReportOptions = {
     predefinedOptions?: string[]
     // When true, render as read-only viewer: disable all controls and hide timer
     readOnly?: boolean
+
+    // Start the timer in paused state (webview local pause). Used for Halt for Feedback integration.
+    // Not part of the public tool API; used internally by the extension.
+    startPaused?: boolean
+
+    // Force-select the Custom option in the webview (when options exist).
+    // Not part of the public tool API; used internally by the extension.
+    preselectCustom?: boolean
     // Internal link to history entry to keep single webview per report
     // Not part of the public tool API; used by tool/commands integration only
     historyId?: string
@@ -119,6 +128,10 @@ export async function askReport(opts: AskReportOptions): Promise<AskUserResult> 
         options: opts.predefinedOptions ?? [],
         timeout: opts.readOnly ? 0 : timeout,
         readonly: opts.readOnly === true,
+
+        // Halt for Feedback integration flags
+        startPaused: opts.startPaused === true,
+        preselectCustom: opts.preselectCustom === true,
     }
 
     panel.webview.html = `<!DOCTYPE html>
@@ -161,7 +174,7 @@ export async function askReport(opts: AskReportOptions): Promise<AskUserResult> 
         <script nonce="${nonce}">
             // Webview script — no external deps; relies on VS Code API provided object
             const vscode = acquireVsCodeApi();
-            /** @type {{ markdown: string; initialValue?: string; options?: string[]; timeout?: number; readonly?: boolean }} */
+            /** @type {{ markdown: string; initialValue?: string; options?: string[]; timeout?: number; readonly?: boolean; startPaused?: boolean; preselectCustom?: boolean }} */
             let initData = { markdown: '', initialValue: '', options: [], timeout: 0, readonly: false };
 
             // cache DOM
@@ -528,8 +541,33 @@ export async function askReport(opts: AskReportOptions): Promise<AskUserResult> 
                     }
                 }
 
+                // Halt for Feedback integration:
+                // - preselect Custom when requested (even if the first option was auto-selected)
+                // - start timer paused when requested
+                if (!initData.readonly) {
+                    if (initData.preselectCustom === true) {
+                        const custom = el.options.querySelector('#opt_custom');
+                        if (custom) {
+                            /** @type {HTMLInputElement} */ (custom).checked = true;
+                            usingCustom = true;
+                            selected = '';
+                        } else {
+                            // If there are no options rendered, we are already in textarea-only mode.
+                            usingCustom = true;
+                            selected = '';
+                        }
+                    }
+                }
+
                 updateSubmitState();
                 updateTextareaVisibility();
+
+                // When forcing Custom, ensure focus is on textarea and submit state is recalculated.
+                if (!initData.readonly && initData.preselectCustom === true) {
+                    try { el.textarea.focus(); } catch {}
+                    updateSubmitState();
+                    updateTextareaVisibility();
+                }
 
                 // Focus management
                 focusFirst();
@@ -541,6 +579,10 @@ export async function askReport(opts: AskReportOptions): Promise<AskUserResult> 
                     ? savedRemaining
                     : ((typeof initData.timeout === 'number' && initData.timeout > 0) ? initData.timeout : 0);
                 paused = savedPaused ?? false;
+
+                if (!initData.readonly && initData.startPaused === true) {
+                    paused = true;
+                }
 
                 // Setup pause button initial state
                 el.pauseBtn.setAttribute('aria-label', paused ? 'Resume timer' : 'Pause timer');
@@ -706,6 +748,25 @@ export class AskReportLanguageModelTool
             // Resolve UID from prepareInvocation (FIFO), or generate new if direct call
             const uid = this._pendingUids.length > 0 ? this._pendingUids.shift()! : randomUUID()
 
+            // Halt for Feedback integration (special rules for ask_report):
+            // 1) If global state is paused: start ask_report's timer paused in the WebView and release global state back to running.
+            // 2) If global state is declined: preselect Custom and prefill it with feedback; also reset global state back to running.
+            const haltSnapshot = haltForFeedbackController.getSnapshot()
+            let startPaused = false
+            let preselectCustom = false
+            let initialValue = ''
+
+            if (haltSnapshot.kind === 'paused') {
+                startPaused = true
+                // Release the global state back to running.
+                haltForFeedbackController.resume()
+            } else if (haltSnapshot.kind === 'declined') {
+                preselectCustom = true
+                // This resets global state to running.
+                const fb = haltForFeedbackController.takeDeclineAndReset()
+                initialValue = (typeof fb === 'string' ? fb : haltSnapshot.feedback)
+            }
+
             // Save to in-memory history immediately to track panel and status
             try {
                 askReportHistory.add({
@@ -720,11 +781,14 @@ export class AskReportLanguageModelTool
             const result = await askReport({
                 title: input.topicName,
                 markdown: input.message,
-                initialValue: '',
+                initialValue,
                 predefinedOptions: Array.isArray(input.predefinedOptions)
                     ? input.predefinedOptions
                     : undefined,
                 historyId: uid,
+
+                startPaused,
+                preselectCustom,
             })
 
             // Update existing history entry with the final result and persist
