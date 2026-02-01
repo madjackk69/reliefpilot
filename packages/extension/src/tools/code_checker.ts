@@ -13,6 +13,7 @@ import {
     languages,
 } from 'vscode';
 import { env } from '../utils/env';
+import { haltForFeedbackController } from '../utils/haltForFeedbackController';
 import { statusBarActivity } from '../utils/statusBar';
 
 export type CodeCheckerInput = {
@@ -113,10 +114,29 @@ export class CodeCheckerLanguageModelTool
     implements LanguageModelTool<CodeCheckerInput> {
     async invoke(
         options: LanguageModelToolInvocationOptions<CodeCheckerInput>,
-        _token: CancellationToken,
+        token: CancellationToken,
     ): Promise<LanguageModelToolResult> {
         statusBarActivity.start('code_checker');
         try {
+            // Halt for Feedback integration: gate before reading diagnostics.
+            let state = haltForFeedbackController.getSnapshot();
+            if (state.kind === 'paused') {
+                state = await haltForFeedbackController.waitUntilNotPaused(token);
+                // Respect VS Code cancellation while waiting in paused state.
+                if (token.isCancellationRequested) {
+                    // Keep current tool contract on cancellation.
+                    throw new Error('This operation was aborted');
+                }
+            }
+
+            if (state.kind === 'declined') {
+                haltForFeedbackController.takeDeclineAndReset();
+                throw new Error(
+                    'Tool execution was declined by the user. Feedback: ' +
+                        state.feedback,
+                );
+            }
+
             const minSeverity = severityFromInput(options.input?.severityLevel);
             const reports = collectDiagnostics(minSeverity);
 
