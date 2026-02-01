@@ -8,6 +8,7 @@ import type {
 } from 'vscode'
 import * as vscode from 'vscode'
 import { env } from '../utils/env'
+import { haltForFeedbackController } from '../utils/haltForFeedbackController'
 import { fetchGitHub } from '../utils/github_auth'
 import { createGithubContentSession, finalizeGithubSession } from '../utils/github_content_sessions'
 import { statusBarActivity } from '../utils/statusBar'
@@ -280,6 +281,25 @@ export class GithubPullRequestReadTool implements LanguageModelTool<GithubPullRe
         const uid = this._pendingUids.length > 0 ? this._pendingUids.shift()! : randomUUID()
         const session = createGithubContentSession(uid, 'github_pull_request_read')
         try {
+            // Halt for Feedback gating: must happen before any GitHub API requests.
+            let state = haltForFeedbackController.getSnapshot()
+            if (state.kind === 'paused') {
+                state = await haltForFeedbackController.waitUntilNotPaused(token)
+            }
+
+            // Respect VS Code cancellation while waiting in paused state.
+            if (token.isCancellationRequested) {
+                // Mimic fetch abort error to preserve existing cancellation behavior as closely as possible.
+                throw (typeof DOMException !== 'undefined')
+                    ? new DOMException('This operation was aborted', 'AbortError')
+                    : new Error('This operation was aborted')
+            }
+
+            if (state.kind === 'declined') {
+                haltForFeedbackController.takeDeclineAndReset()
+                throw new Error('Tool execution was declined by the user. Feedback: ' + state.feedback)
+            }
+
             const method = normalizeMethod(options.input?.method)
             const owner = normalizeString('owner', options.input?.owner)
             const repo = normalizeString('repo', options.input?.repo)
@@ -343,6 +363,10 @@ export class GithubPullRequestReadTool implements LanguageModelTool<GithubPullRe
             return new vscode.LanguageModelToolResult([new vscode.LanguageModelTextPart(body)])
         } catch (err) {
             const message = err instanceof Error ? err.message : String(err)
+            if (typeof message === 'string' && message.startsWith('Tool execution was declined by the user.')) {
+                // Preserve exact error format
+                throw new Error(message)
+            }
             const errorBody = `github_pull_request_read error: ${message}`
             session.contentBuffer = errorBody
             try { session.contentEmitter.fire(session.contentBuffer) } catch { /* ignore */ }
