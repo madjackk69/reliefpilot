@@ -29,13 +29,9 @@ Can you check the docs and explain how the project works? #ask_report
 - Open it from the Command Palette: `Relief Pilot: Halt for Feedback` (also available as the first item in the status bar menu).
 - While paused, any Relief Pilot tool invocation will wait until you resume.
 - Click **Resume work** to continue normal execution.
-- Click **Send feedback** to cancel the current tool execution with a reason (the button is disabled until the input contains non-whitespace text).
+- Click **Send feedback** to cancel the current tool execution with a reason.
 
-If a tool execution is declined, the error message will include your feedback:
-
-```text
-Error: Tool execution was declined by the user. Feedback: <TEXT>
-```
+If a tool execution is declined, the error message will include your feedback
 
 ### AI Fetch URL
 
