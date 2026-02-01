@@ -47,7 +47,7 @@ export async function openOrFocusHaltForFeedback(): Promise<void> {
 
     // Panel icon (optional, keep consistent with extension)
     try {
-        panel.iconPath = vscode.Uri.joinPath(extensionUri, 'icon_mono.png')
+      panel.iconPath = vscode.Uri.joinPath(extensionUri, 'icon.png')
     } catch {
         // ignore icon assignment errors
     }
@@ -75,19 +75,38 @@ export async function openOrFocusHaltForFeedback(): Promise<void> {
     <link rel="stylesheet" href="${cssUri}" />
     <title>Halt for Feedback</title>
     <style>
-      /* Keep layout simple; reuse ask_report styles for inputs/buttons */
+      /* Tight, pleasant layout; reuse ask_report styles for inputs/buttons */
+      body { padding: 16px; }
       .halt__container { display: grid; gap: 12px; max-width: 900px; }
-      .halt__text { opacity: 0.95; }
+      .halt__banner {
+        display: grid;
+        gap: 6px;
+        padding: 12px 12px;
+        border: 1px solid var(--vscode-editorWidget-border);
+        border-radius: 10px;
+        background: var(--vscode-editorWidget-background, transparent);
+      }
+      .halt__title {
+        margin: 0;
+        font-size: 1.2rem;
+        font-weight: 650;
+        line-height: 1.25;
+      }
+      .halt__subtitle {
+        margin: 0;
+        opacity: 0.85;
+        max-width: 80ch;
+      }
       textarea { display: block; }
-      .actions { justify-content: flex-start; }
+      .actions { justify-content: center; }
     </style>
   </head>
   <body>
     <div class="halt__container">
-      <div class="halt__text markdown" aria-label="Halt for Feedback text">
-        <p>Execution is paused.</p>
-        <p>You can resume work, or cancel the current tool execution by sending feedback.</p>
-      </div>
+      <section class="halt__banner" aria-label="Halt for Feedback">
+        <h2 class="halt__title">Execution is paused</h2>
+        <p class="halt__subtitle">Resume work, or cancel the current tool execution by sending feedback.</p>
+      </section>
 
       <textarea id="feedback" class="textarea" aria-label="Feedback" placeholder="Type feedback…"></textarea>
 
@@ -137,6 +156,18 @@ export async function openOrFocusHaltForFeedback(): Promise<void> {
       });
 
       sendBtn.addEventListener('click', () => {
+        const text = (textarea.value || '').trim();
+        if (!text) return;
+        persistState();
+        vscode.postMessage({ type: 'send', value: text });
+      });
+
+      // Keyboard shortcut: Ctrl/Cmd+Enter sends feedback
+      document.addEventListener('keydown', (ev) => {
+        const isSubmitCombo = (ev.key === 'Enter' && (ev.ctrlKey || ev.metaKey));
+        if (!isSubmitCombo) return;
+        ev.preventDefault();
+        if (sendBtn.disabled) return;
         const text = (textarea.value || '').trim();
         if (!text) return;
         persistState();
