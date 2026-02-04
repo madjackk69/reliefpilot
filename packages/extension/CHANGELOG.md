@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.6.1 - 2026-02-04
+
+- feat(ai_fetch_url): enhance fetch logic with retryable attempts
+
 ## 0.6.0 - 2026-02-01
 
 - feat(haltForFeedback): implement halt for feedback functionality
