@@ -432,22 +432,57 @@ export class AiFetchUrlLanguageModelTool implements LanguageModelTool<AiFetchUrl
                     throw new Error('Tool execution was declined by the user. Feedback: ' + state.feedback);
                 }
 
-                const response = await fetch(target, {
-                    method: 'GET',
-                    signal: controller.signal,
-                    headers: {
-                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-                        'Accept-Language': 'en-US,en;q=0.9',
-                        'Accept-Encoding': 'gzip, deflate, br',
-                        'DNT': '1',
-                        'Connection': 'keep-alive',
-                        'Upgrade-Insecure-Requests': '1'
-                    }
-                });
+                const retryableStatuses = new Set([403, 406, 429]);
+                const browserLikeHeaders = {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+                    'Accept-Language': 'en-US,en;q=0.9',
+                    'Accept-Encoding': 'gzip, deflate, br',
+                    'DNT': '1',
+                    'Connection': 'keep-alive',
+                    'Upgrade-Insecure-Requests': '1'
+                };
 
-                if (!response.ok) {
+                const fetchAttempts: Array<{ headers?: Record<string, string> }> = [
+                    {
+                        headers: {
+                            'User-Agent': 'curl/8.7.1',
+                            'Accept': '*/*'
+                        }
+                    },
+                    // No headers at all
+                    {},
+                    { headers: browserLikeHeaders },
+                ];
+
+                let response: Response | undefined;
+
+                for (let i = 0; i < fetchAttempts.length; i++) {
+                    const attempt = fetchAttempts[i]!;
+                    const init: RequestInit = {
+                        method: 'GET',
+                        signal: controller.signal,
+                    };
+                    if (attempt.headers) {
+                        init.headers = attempt.headers;
+                    }
+
+                    response = await fetch(target, init);
+                    if (response.ok) {
+                        break;
+                    }
+
+                    const shouldRetry = retryableStatuses.has(response.status) && i < fetchAttempts.length - 1;
+                    if (shouldRetry) {
+                        try { response.body?.cancel(); } catch { /* ignore */ }
+                        continue;
+                    }
+
                     throw new Error(`Request failed with status ${response.status} ${response.statusText}`);
+                }
+
+                if (!response || !response.ok) {
+                    throw new Error('Request failed: no response received.');
                 }
 
                 // Read body as bytes and classify using isbinaryfile (no header heuristics)
