@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.6.2 - 2026-02-05
+
+- feat(halt_for_feedback): add ESC key to closes the panel and resumes work
+
 ## 0.6.1 - 2026-02-04
 
 - feat(ai_fetch_url): enhance fetch logic with retryable attempts
