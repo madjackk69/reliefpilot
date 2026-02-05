@@ -162,8 +162,16 @@ export async function openOrFocusHaltForFeedback(): Promise<void> {
         vscode.postMessage({ type: 'send', value: text });
       });
 
-      // Keyboard shortcut: Ctrl/Cmd+Enter sends feedback
+      // Keyboard shortcuts:
+      // - ESC closes the panel (resume work)
+      // - Ctrl/Cmd+Enter sends feedback
       document.addEventListener('keydown', (ev) => {
+        if (ev.key === 'Escape') {
+          ev.preventDefault();
+          persistState();
+          vscode.postMessage({ type: 'resume' });
+          return;
+        }
         const isSubmitCombo = (ev.key === 'Enter' && (ev.ctrlKey || ev.metaKey));
         if (!isSubmitCombo) return;
         ev.preventDefault();
