@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.6.3 - 2026-02-07
+
+- feat(confirmation_ui): enhance button location support in input boxes
+
 ## 0.6.2 - 2026-02-05
 
 - feat(halt_for_feedback): add ESC key to closes the panel and resumes work
