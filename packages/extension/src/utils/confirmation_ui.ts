@@ -21,10 +21,15 @@ export class ConfirmationUI {
     inputBox.valueSelection = [0, 0];
     inputBox.ignoreFocusOut = true;
 
+    const supportsQuickInputButtonLocation = typeof (vscode as any).QuickInputButtonLocation?.Inline === 'number';
+
     const approveButton: vscode.QuickInputButton = {
       iconPath: new vscode.ThemeIcon('check'),
       tooltip: approveLabel,
     };
+    if (supportsQuickInputButtonLocation) {
+      (approveButton as any).location = (vscode as any).QuickInputButtonLocation?.Inline ?? 2;
+    }
     const denyButton: vscode.QuickInputButton = {
       iconPath: new vscode.ThemeIcon('x'),
       tooltip: denyLabel,
@@ -50,11 +55,14 @@ export class ConfirmationUI {
         fb.placeholder = 'Add context for the agent (optional)';
         fb.ignoreFocusOut = true;
         const fbApproveButton: vscode.QuickInputButton = {
-          iconPath: new vscode.ThemeIcon('check'),
+          iconPath: new vscode.ThemeIcon('send'),
           tooltip: 'Send feedback',
         };
+        if (supportsQuickInputButtonLocation) {
+          (fbApproveButton as any).location = (vscode as any).QuickInputButtonLocation?.Inline ?? 2;
+        }
         const fbBackButton: vscode.QuickInputButton = {
-          iconPath: new vscode.ThemeIcon('x'),
+          iconPath: new vscode.ThemeIcon('arrow-left'),
           tooltip: 'Back to command',
         };
         fb.buttons = [fbApproveButton, fbBackButton];
@@ -144,6 +152,8 @@ export class ConfirmationUI {
     inputBox.placeholder = detail ? '' : '';
     inputBox.ignoreFocusOut = true;
 
+    const supportsQuickInputButtonLocation = typeof (vscode as any).QuickInputButtonLocation?.Inline === 'number';
+
     const approveButton: vscode.QuickInputButton = {
       iconPath: new vscode.ThemeIcon('check'),
       tooltip: approveLabel,
@@ -172,11 +182,14 @@ export class ConfirmationUI {
         fb.placeholder = 'Add context for the agent (optional)';
         fb.ignoreFocusOut = true;
         const fbApproveButton: vscode.QuickInputButton = {
-          iconPath: new vscode.ThemeIcon('check'),
+          iconPath: new vscode.ThemeIcon('send'),
           tooltip: 'Send feedback',
         };
+        if (supportsQuickInputButtonLocation) {
+          (fbApproveButton as any).location = (vscode as any).QuickInputButtonLocation?.Inline ?? 2;
+        }
         const fbBackButton: vscode.QuickInputButton = {
-          iconPath: new vscode.ThemeIcon('x'),
+          iconPath: new vscode.ThemeIcon('arrow-left'),
           tooltip: 'Back to confirmation',
         };
         fb.buttons = [fbApproveButton, fbBackButton];
