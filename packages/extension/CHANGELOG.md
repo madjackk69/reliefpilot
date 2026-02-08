@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.6.4 - 2026-02-08
+
+- feat(ai_fetch_url): enhance model selection with toggle for Copilot models
+
 ## 0.6.3 - 2026-02-07
 
 - feat(confirmation_ui): enhance button location support in input boxes
