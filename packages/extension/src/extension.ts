@@ -266,10 +266,111 @@ async function selectModelForAiFetchUrl() {
     detail: `id: ${m.id}`,
   }));
 
-  const chosen = await vscode.window.showQuickPick(picks, {
-    placeHolder: 'Select model for ai_fetch_url',
-    ignoreFocusOut: true,
+  // Feature-check Quick Input APIs (v1.109+).
+  const supportsQuickInputButtonLocation = typeof (vscode as any).QuickInputButtonLocation?.Inline === 'number';
+  const supportsQuickInputButtonToggle = supportsQuickInputButtonLocation;
+
+  if (!supportsQuickInputButtonToggle) {
+    const chosen = await vscode.window.showQuickPick(picks, {
+      placeHolder: 'Select model for ai_fetch_url',
+      ignoreFocusOut: true,
+    });
+    if (!chosen) {
+      return; // user canceled
+    }
+
+    try {
+      await vscode.workspace
+        .getConfiguration('reliefpilot')
+        .update('AiFetchUrlModel', chosen.id, vscode.ConfigurationTarget.Global);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      vscode.window.showErrorMessage(`Failed to update reliefpilot.AiFetchUrlModel: ${message}`);
+    }
+    return;
+  }
+
+  type ModelPick = vscode.QuickPickItem & { id: string; isCopilot: boolean };
+  const allPicks: ModelPick[] = picks.map((p) => {
+    const labelLower = (p.label ?? '').toLowerCase();
+    const idLower = (p.id ?? '').toLowerCase();
+    const isCopilot = labelLower.includes('copilot') || labelLower.includes('github') || idLower.includes('copilot');
+    return { ...p, isCopilot };
   });
+
+  const qp = vscode.window.createQuickPick<ModelPick>();
+  qp.title = 'Select Model for ai_fetch_url';
+  qp.ignoreFocusOut = true;
+  qp.matchOnDescription = true;
+  qp.matchOnDetail = true;
+
+  // Default ON: show only Copilot models.
+  let copilotOnly = true;
+
+  const copilotOnlyButton: vscode.QuickInputButton = {
+    iconPath: new vscode.ThemeIcon('filter'),
+    tooltip: 'Copilot only',
+  };
+  // v1.109+: toggle buttons. VS Code updates `toggle.checked` and passes the new value into the trigger event.
+  // Keep all access behind `any` to stay compatible with older @types/vscode.
+  const copilotOnlyToggleState = { checked: copilotOnly };
+  (copilotOnlyButton as any).toggle = copilotOnlyToggleState;
+  if (supportsQuickInputButtonLocation) {
+    // Requested: render the toggle inside the input field when supported.
+    (copilotOnlyButton as any).location = (vscode as any).QuickInputButtonLocation?.Input
+      ?? (vscode as any).QuickInputButtonLocation?.Inline
+      ?? 2;
+  }
+  qp.buttons = [copilotOnlyButton];
+
+  const refreshItems = () => {
+    const next = copilotOnly ? allPicks.filter((p) => p.isCopilot) : allPicks;
+    qp.placeholder = copilotOnly ? 'Select Copilot model for ai_fetch_url' : 'Select model for ai_fetch_url';
+    qp.items = next;
+  };
+  refreshItems();
+
+  const chosen = await new Promise<ModelPick | undefined>((resolve) => {
+    let done = false;
+    const dispose = () => {
+      try { qp.hide(); } catch { }
+      try { qp.dispose(); } catch { }
+    };
+    const finish = (picked: ModelPick | undefined) => {
+      if (done) {
+        return;
+      }
+      done = true;
+      dispose();
+      resolve(picked);
+    };
+
+    qp.onDidTriggerButton((btn) => {
+      if (btn !== copilotOnlyButton) {
+        return;
+      }
+
+      // Per VS Code 1.109 implementation, the extension-host updates `button.toggle.checked`
+      // before firing `onDidTriggerButton`.
+      copilotOnly = copilotOnlyToggleState.checked;
+      refreshItems();
+    });
+
+    qp.onDidAccept(() => {
+      finish(qp.selectedItems[0]);
+    });
+
+    qp.onDidHide(() => {
+      if (!done) {
+        done = true;
+        try { qp.dispose(); } catch { }
+        resolve(undefined);
+      }
+    });
+
+    qp.show();
+  });
+
   if (!chosen) {
     return; // user canceled
   }
