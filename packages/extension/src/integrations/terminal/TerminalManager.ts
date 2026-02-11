@@ -9,8 +9,6 @@
 
 	SPDX-License-Identifier: Apache-2.0
 */
-
-import pWaitFor from "p-wait-for"
 import * as vscode from "vscode"
 import { arePathsEqual } from "../../utils/path"
 import { mergePromise, TerminalProcess, TerminalProcessResultPromise } from "./TerminalProcess"
@@ -140,9 +138,11 @@ export class TerminalManager {
 	}
 
 	runCommand(terminalInfo: TerminalInfo, command: string): TerminalProcessResultPromise {
+		const isFirstCommandInTerminal = terminalInfo.lastCommand === ""
 		terminalInfo.busy = true
 		terminalInfo.lastCommand = command
 		const process = new TerminalProcess()
+		process.newTerminal = isFirstCommandInTerminal
 		this.processes.set(terminalInfo.id, process)
 
 		process.once("completed", () => {
@@ -168,38 +168,8 @@ export class TerminalManager {
 			})
 		})
 
-		// if shell integration executeCommand is already available, run the command immediately
-		if (terminalInfo.terminal.shellIntegration?.executeCommand) {
-			process.waitForShellIntegration = false
-			console.log(`Running command in terminal ${terminalInfo.id} with shell integration:`, command)
-			process.run(terminalInfo.terminal, command)
-		} else {
-			// Fast path for single-line commands:
-			// Use sendText + onDidStartTerminalShellExecution to capture output without
-			// waiting for shellIntegration.executeCommand to become available.
-			// This reduces latency for freshly created terminals.
-			if (!command.includes("\n")) {
-				process.waitForShellIntegration = false
-				process.newTerminal = true
-				process.preferSendText = true
-				console.log(`Running command in terminal ${terminalInfo.id} via sendText fast path:`, command)
-				process.run(terminalInfo.terminal, command)
-				return mergePromise(process, promise)
-			}
-
-			// docs recommend waiting for shell integration to activate
-			console.log(`Waiting for shell integration in terminal ${terminalInfo.id}...`)
-			pWaitFor(() => typeof terminalInfo.terminal.shellIntegration?.executeCommand === "function", { timeout: 4000 }).finally(() => {
-				const existingProcess = this.processes.get(terminalInfo.id)
-				if (existingProcess && existingProcess.waitForShellIntegration) {
-					existingProcess.waitForShellIntegration = false
-					// Mark as new terminal: the shell's readline may not have
-					// activated yet even though shell integration is available.
-					existingProcess.newTerminal = true
-					existingProcess.run(terminalInfo.terminal, command)
-				}
-			})
-		}
+		console.log(`Running command in terminal ${terminalInfo.id} via sendText:`, command)
+		process.run(terminalInfo.terminal, command)
 
 		return mergePromise(process, promise)
 	}
