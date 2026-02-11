@@ -11,6 +11,7 @@
 */
 
 import { EventEmitter } from "events"
+import pWaitFor from "p-wait-for"
 import * as vscode from "vscode"
 import { stripAnsi } from "./ansiUtils.js"
 
@@ -24,13 +25,47 @@ export interface TerminalProcessEvents {
 
 export class TerminalProcess extends EventEmitter<TerminalProcessEvents> {
 	waitForShellIntegration: boolean = true
+	/**
+	 * Set to true by TerminalManager when the terminal was freshly created and
+	 * had to wait for shell integration activation. In that case sendText-based
+	 * paths must add a brief delay to let the shell finish initialising
+	 * readline mode (raw mode) before sending text; otherwise the PTY driver
+	 * echoes characters in cooked mode, causing duplicate output.
+	 */
+	newTerminal: boolean = false
 	private isListening: boolean = true
 	private buffer: string = ""
 
 	async run(terminal: vscode.Terminal, command: string) {
 		if (terminal.shellIntegration && terminal.shellIntegration.executeCommand) {
-			const execution = terminal.shellIntegration.executeCommand(command)
-			const stream = execution.read()
+			let stream: AsyncIterable<string>
+
+			if (command.includes('\n')) {
+				// Multi-line commands cause VS Code's shell integration executeCommand() to
+				// hang because its internal multi-line execution tracking
+				// (splitAndSanitizeCommandLine / endShellExecution in
+				// extHostTerminalShellIntegration.ts) never resolves when the shell does not
+				// emit OSC 633 sequences for continuation prompts.
+				//
+				// Use sendText() to deliver the command (the shell handles continuation
+				// prompts naturally), then obtain the execution output stream via the
+				// onDidStartTerminalShellExecution event. This avoids the problematic
+				// multi-line tracking code path entirely while preserving full stream output.
+				const streamOrNull = await this.runViaSendText(terminal, command)
+				if (!streamOrNull) {
+					// sendText was already called inside runViaSendText; stream tracking
+					// is not available (no shell integration events or timed out).
+					this.emit("completed")
+					this.emit("continue")
+					this.emit("no_shell_integration")
+					return
+				}
+				stream = streamOrNull
+			} else {
+				const execution = terminal.shellIntegration.executeCommand(command)
+				stream = execution.read()
+			}
+
 			// todo: need to handle errors
 			let isFirstChunk = true
 			let didOutputNonCommand = false
@@ -134,6 +169,106 @@ export class TerminalProcess extends EventEmitter<TerminalProcessEvents> {
 			// 	// can't emit completed since we don't if the command actually completed, it could still be running server
 			// }, 500) // Adjust this delay as needed
 		}
+	}
+
+	/**
+	 * Send a command to the terminal via sendText and obtain the execution output
+	 * stream through the onDidStartTerminalShellExecution event.
+	 *
+	 * This avoids VS Code's internal multi-line execution tracking which causes
+	 * executeCommand().read() to hang when the command contains newline characters.
+	 * The shell handles continuation prompts naturally when text is sent directly,
+	 * and the shell integration events still fire correctly for completion tracking.
+	 *
+	 * @returns The async iterable stream from the execution, or null if the shell
+	 *          integration start event is unavailable or does not fire in time.
+	 */
+	private async runViaSendText(
+		terminal: vscode.Terminal,
+		command: string,
+	): Promise<AsyncIterable<string> | null> {
+		const onStart = (
+			vscode.window as vscode.Window
+		).onDidStartTerminalShellExecution
+
+		if (!onStart) {
+			// Event API not available (older VS Code); fall back to plain sendText.
+			terminal.sendText(command, true)
+			return null
+		}
+
+		// For freshly created terminals the shell may not yet be in readline
+		// mode (raw mode) when this method is called. Shell integration reports
+		// executeCommand as available after detecting OSC 633 markers, but the
+		// shell's line editor typically activates slightly later. Sending text
+		// while the PTY is still in cooked mode causes the terminal driver to
+		// echo the characters, resulting in duplicate output.
+		//
+		// We first ensure CWD is detected (happens in precmd, right before the
+		// prompt) and then add a fixed delay to let readline finish activating.
+		// The flag is set by TerminalManager only for terminals that had to
+		// wait for shell integration — existing terminals already have readline
+		// active and skip the delay entirely.
+		if (this.newTerminal) {
+			if (terminal.shellIntegration && !terminal.shellIntegration.cwd) {
+				try {
+					await pWaitFor(() => !!terminal.shellIntegration?.cwd, {
+						timeout: 5000,
+						interval: 50,
+					})
+				} catch {
+					// Timed out; proceed anyway.
+				}
+			}
+			// CWD is reported from precmd which runs before the prompt is drawn
+			// and before readline enters raw mode. A brief delay bridges this gap.
+			await new Promise(resolve => setTimeout(resolve, 300))
+		}
+
+		return new Promise<AsyncIterable<string> | null>((resolve) => {
+			let settled = false
+
+			let disposable: vscode.Disposable | undefined
+			try {
+				disposable = onStart((e: any) => {
+					try {
+						if (!settled && e?.terminal === terminal && e?.execution) {
+							settled = true
+							disposable?.dispose()
+							clearTimeout(timer)
+							resolve(e.execution.read())
+						}
+					} catch (err) {
+						console.error('runViaSendText: error in start listener', err)
+						if (!settled) {
+							settled = true
+							disposable?.dispose()
+							clearTimeout(timer)
+							resolve(null)
+						}
+					}
+				})
+			} catch (err) {
+				console.error('runViaSendText: failed to subscribe to shell execution start', err)
+				terminal.sendText(command, true)
+				resolve(null)
+				return
+			}
+
+			// Safety net: if the shell integration does not report execution start
+			// within 15 seconds, give up on stream tracking. The command has already
+			// been sent and may still be running; the caller will emit the appropriate
+			// fallback events.
+			const timer = setTimeout(() => {
+				if (!settled) {
+					settled = true
+					disposable?.dispose()
+					resolve(null)
+				}
+			}, 15_000)
+
+			terminal.sendText(command, true)
+		})
 	}
 
 	// Inspired by https://github.com/sindresorhus/execa/blob/main/lib/transform/split.js

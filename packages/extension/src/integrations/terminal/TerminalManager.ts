@@ -180,6 +180,9 @@ export class TerminalManager {
 				const existingProcess = this.processes.get(terminalInfo.id)
 				if (existingProcess && existingProcess.waitForShellIntegration) {
 					existingProcess.waitForShellIntegration = false
+					// Mark as new terminal: the shell's readline may not have
+					// activated yet even though shell integration is available.
+					existingProcess.newTerminal = true
 					existingProcess.run(terminalInfo.terminal, command)
 				}
 			})
