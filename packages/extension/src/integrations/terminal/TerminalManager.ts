@@ -97,19 +97,6 @@ export class TerminalManager {
 	private disposables: vscode.Disposable[] = []
 
 	private constructor() {
-		let disposable: vscode.Disposable | undefined
-		try {
-			disposable = (vscode.window as vscode.Window).onDidStartTerminalShellExecution?.(async (e) => {
-				// Creating a read stream here results in a more consistent output. This is most obvious when running the `date` command.
-				e?.execution?.read()
-			})
-		} catch (error) {
-			// console.error("Error setting up onDidEndTerminalShellExecution", error)
-		}
-		if (disposable) {
-			this.disposables.push(disposable)
-		}
-
 		this.disposables.push(
 			vscode.window.onDidCloseTerminal((terminal) => {
 				try {
