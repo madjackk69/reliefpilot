@@ -15,6 +15,30 @@ import pWaitFor from "p-wait-for"
 import * as vscode from "vscode"
 import { stripAnsi } from "./ansiUtils.js"
 
+const executionStreamCache = new WeakMap<any, AsyncIterable<string>>()
+
+function getOrCreateExecutionStream(execution: any): AsyncIterable<string> {
+	const cached = executionStreamCache.get(execution)
+	if (cached) {
+		return cached
+	}
+	const stream: AsyncIterable<string> = execution.read()
+	executionStreamCache.set(execution, stream)
+	return stream
+}
+
+/**
+ * Prime the execution stream as early as possible to avoid missing initial bytes.
+ * This should be called from a global `onDidStartTerminalShellExecution` listener.
+ */
+export function primeExecutionStream(execution: any): void {
+	try {
+		getOrCreateExecutionStream(execution)
+	} catch {
+		// Ignore priming errors; the command-specific path will handle failures.
+	}
+}
+
 export interface TerminalProcessEvents {
 	line: [line: string]
 	continue: []
@@ -46,7 +70,12 @@ export class TerminalProcess extends EventEmitter<TerminalProcessEvents> {
 			return
 		}
 
-		await this.consumeStream(streamOrNull, command)
+		try {
+			await this.consumeStream(streamOrNull, command)
+		} catch (err) {
+			this.emit("error", err instanceof Error ? err : new Error(String(err)))
+			return
+		}
 		this.emitRemainingBufferIfListening()
 		this.emit("completed")
 		this.emit("continue")
@@ -55,6 +84,10 @@ export class TerminalProcess extends EventEmitter<TerminalProcessEvents> {
 	private async consumeStream(stream: AsyncIterable<string>, command: string) {
 		let didOutputNonCommand = false
 		const expectedCommand = command.trim()
+		const commandLines = new Set(
+			expectedCommand.split("\n").map((l) => l.trim()).filter((l) => l.length > 0),
+		)
+		const commandLineList = [...commandLines]
 
 		for await (let data of stream) {
 			// Remove ANSI/OSC escape sequences (including VS Code shell integration sequences)
@@ -69,12 +102,21 @@ export class TerminalProcess extends EventEmitter<TerminalProcessEvents> {
 					const rawLine = lines[i]
 					const cleaned = rawLine.replace(/^[\x00-\x1F]+/g, "").trim()
 
-					let isEchoedCommand = cleaned === expectedCommand
-					if (!isEchoedCommand && cleaned.endsWith(expectedCommand)) {
-						const prefix = cleaned.slice(0, cleaned.length - expectedCommand.length).trimEnd()
-						const lastChar = prefix.length > 0 ? prefix[prefix.length - 1] : ""
-						if (lastChar && "%$#>".includes(lastChar)) {
-							isEchoedCommand = true
+					let isEchoedCommand = commandLines.has(cleaned)
+					if (!isEchoedCommand) {
+						for (const commandLine of commandLineList) {
+							if (!commandLine) {
+								continue
+							}
+							if (!cleaned.endsWith(commandLine)) {
+								continue
+							}
+							const prefix = cleaned.slice(0, cleaned.length - commandLine.length).trimEnd()
+							const lastChar = prefix.length > 0 ? prefix[prefix.length - 1] : ""
+							if (lastChar && "%$#>".includes(lastChar)) {
+								isEchoedCommand = true
+								break
+							}
 						}
 					}
 
@@ -160,7 +202,7 @@ export class TerminalProcess extends EventEmitter<TerminalProcessEvents> {
 							settled = true
 							disposable?.dispose()
 							clearTimeout(timer)
-							resolve(e.execution.read())
+							resolve(getOrCreateExecutionStream(e.execution))
 						}
 					} catch (err) {
 						console.error('runViaSendText: error in start listener', err)
@@ -220,6 +262,9 @@ export class TerminalProcess extends EventEmitter<TerminalProcessEvents> {
 		}
 	}
 
+	/**
+	 * @deprecated Kept for compatibility/future long-running command handling.
+	 */
 	continue() {
 		this.emitRemainingBufferIfListening()
 		this.isListening = false

@@ -11,7 +11,7 @@
 */
 import * as vscode from "vscode"
 import { arePathsEqual } from "../../utils/path"
-import { mergePromise, TerminalProcess, TerminalProcessResultPromise } from "./TerminalProcess"
+import { mergePromise, primeExecutionStream, TerminalProcess, TerminalProcessResultPromise } from "./TerminalProcess"
 import { TerminalInfo, TerminalRegistry } from "./TerminalRegistry"
 
 /*
@@ -97,6 +97,23 @@ export class TerminalManager {
 	private disposables: vscode.Disposable[] = []
 
 	private constructor() {
+		// Prime the execution stream as early as possible to avoid missing initial bytes.
+		// This intentionally does not consume the stream; it only ensures `read()` is called
+		// once per execution and cached for the command-specific consumer.
+		let disposable: vscode.Disposable | undefined
+		try {
+			disposable = (vscode.window as vscode.Window).onDidStartTerminalShellExecution?.((e: any) => {
+				if (e?.execution) {
+					primeExecutionStream(e.execution)
+				}
+			})
+		} catch {
+			// Ignore
+		}
+		if (disposable) {
+			this.disposables.push(disposable)
+		}
+
 		this.disposables.push(
 			vscode.window.onDidCloseTerminal((terminal) => {
 				try {
@@ -133,6 +150,9 @@ export class TerminalManager {
 		this.processes.set(terminalInfo.id, process)
 
 		process.once("completed", () => {
+			terminalInfo.busy = false
+		})
+		process.once("error", () => {
 			terminalInfo.busy = false
 		})
 
@@ -210,5 +230,6 @@ export class TerminalManager {
 		this.processes.clear()
 		this.disposables.forEach((disposable) => disposable.dispose())
 		this.disposables = []
+		TerminalManager.instance = null
 	}
 }
