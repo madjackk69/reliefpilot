@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.7.1 - 2026-02-11
+
+- fix(terminal): remove timeout for execution stream tracking
+
 ## 0.7.0 - 2026-02-11
 
 - feat(terminal): add newTerminal option for command execution

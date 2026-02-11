@@ -201,7 +201,6 @@ export class TerminalProcess extends EventEmitter<TerminalProcessEvents> {
 						if (!settled && e?.terminal === terminal && e?.execution) {
 							settled = true
 							disposable?.dispose()
-							clearTimeout(timer)
 							resolve(getOrCreateExecutionStream(e.execution))
 						}
 					} catch (err) {
@@ -209,7 +208,6 @@ export class TerminalProcess extends EventEmitter<TerminalProcessEvents> {
 						if (!settled) {
 							settled = true
 							disposable?.dispose()
-							clearTimeout(timer)
 							resolve(null)
 						}
 					}
@@ -220,18 +218,6 @@ export class TerminalProcess extends EventEmitter<TerminalProcessEvents> {
 				resolve(null)
 				return
 			}
-
-			// Safety net: if the shell integration does not report execution start
-			// within 15 seconds, give up on stream tracking. The command has already
-			// been sent and may still be running; the caller will emit the appropriate
-			// fallback events.
-			const timer = setTimeout(() => {
-				if (!settled) {
-					settled = true
-					disposable?.dispose()
-					resolve(null)
-				}
-			}, 15_000)
 
 			terminal.sendText(command, true)
 		})
