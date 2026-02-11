@@ -3,7 +3,7 @@
   "displayName": "Relief Pilot",
   "description": "A Swiss Army knife for AI agents in VS Code: safer tool calling, human-in-the-loop approvals, and smarter doc fetching to boost productivity and save you money.",
   "publisher": "ivan-mezentsev",
-  "version": "0.6.4",
+  "version": "0.7.0",
   "type": "commonjs",
   "icon": "icon.png",
   "categories": [
@@ -303,6 +303,10 @@
             "customCwd": {
               "type": "string",
               "description": "Optional custom working directory for command execution"
+            },
+            "newTerminal": {
+              "type": "boolean",
+              "description": "If true, always create a new terminal for this command. Default is false."
             },
             "destructiveFlag": {
               "type": "boolean",

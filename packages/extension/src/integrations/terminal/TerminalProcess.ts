@@ -11,8 +11,33 @@
 */
 
 import { EventEmitter } from "events"
+import pWaitFor from "p-wait-for"
 import * as vscode from "vscode"
 import { stripAnsi } from "./ansiUtils.js"
+
+const executionStreamCache = new WeakMap<any, AsyncIterable<string>>()
+
+function getOrCreateExecutionStream(execution: any): AsyncIterable<string> {
+	const cached = executionStreamCache.get(execution)
+	if (cached) {
+		return cached
+	}
+	const stream: AsyncIterable<string> = execution.read()
+	executionStreamCache.set(execution, stream)
+	return stream
+}
+
+/**
+ * Prime the execution stream as early as possible to avoid missing initial bytes.
+ * This should be called from a global `onDidStartTerminalShellExecution` listener.
+ */
+export function primeExecutionStream(execution: any): void {
+	try {
+		getOrCreateExecutionStream(execution)
+	} catch {
+		// Ignore priming errors; the command-specific path will handle failures.
+	}
+}
 
 export interface TerminalProcessEvents {
 	line: [line: string]
@@ -23,117 +48,193 @@ export interface TerminalProcessEvents {
 }
 
 export class TerminalProcess extends EventEmitter<TerminalProcessEvents> {
-	waitForShellIntegration: boolean = true
+	/**
+	 * Set to true by TerminalManager when the terminal was freshly created and
+	 * is about to receive its first command. In that case sendText-based paths
+	 * must add a brief delay to let the shell finish initialising
+	 * readline mode (raw mode) before sending text; otherwise the PTY driver
+	 * echoes characters in cooked mode, causing duplicate output.
+	 */
+	newTerminal: boolean = false
 	private isListening: boolean = true
 	private buffer: string = ""
 
 	async run(terminal: vscode.Terminal, command: string) {
-		if (terminal.shellIntegration && terminal.shellIntegration.executeCommand) {
-			const execution = terminal.shellIntegration.executeCommand(command)
-			const stream = execution.read()
-			// todo: need to handle errors
-			let isFirstChunk = true
-			let didOutputNonCommand = false
-			for await (let data of stream) {
-				// 1. Process chunk and remove artifacts
-				if (isFirstChunk) {
-					/*
-					The first chunk we get from this stream needs to be processed to be more human readable, ie remove vscode's custom escape sequences and identifiers, removing duplicate first char bug, etc.
-					*/
-
-					// bug where sometimes the command output makes its way into vscode shell integration metadata
-					/*
-					]633 is a custom sequence number used by VSCode shell integration:
-					- OSC 633 ; A ST - Mark prompt start
-					- OSC 633 ; B ST - Mark prompt end
-					- OSC 633 ; C ST - Mark pre-execution (start of command output)
-					- OSC 633 ; D [; <exitcode>] ST - Mark execution finished with optional exit code
-					- OSC 633 ; E ; <commandline> [; <nonce>] ST - Explicitly set command line with optional nonce
-					*/
-					// if you print this data you might see something like "eecho hello worldo hello world;5ba85d14-e92a-40c4-b2fd-71525581eeb0]633;C" but this is actually just a bunch of escape sequences, ignore up to the first ;C
-					/* ddateb15026-6a64-40db-b21f-2a621a9830f0]633;CTue Sep 17 06:37:04 EDT 2024 % ]633;D;0]633;P;Cwd=/Users/saoud/Repositories/test */
-					// Gets output between ]633;C (command start) and ]633;D (command end)
-					const outputBetweenSequences = this.removeLastLineArtifacts(
-						data.match(/\]633;C([\s\S]*?)\]633;D/)?.[1] || "",
-					).trim()
-
-					// Once we've retrieved any potential output between sequences, we can remove everything up to end of the last sequence
-					// https://code.visualstudio.com/docs/terminal/shell-integration#_vs-code-custom-sequences-osc-633-st
-					const vscodeSequenceRegex = /\x1b\]633;.[^\x07]*\x07/g
-					const lastMatch = [...data.matchAll(vscodeSequenceRegex)].pop()
-					if (lastMatch && lastMatch.index !== undefined) {
-						data = data.slice(lastMatch.index + lastMatch[0].length)
-					}
-					// Place output back after removing vscode sequences
-					if (outputBetweenSequences) {
-						data = outputBetweenSequences + "\n" + data
-					}
-					// remove ansi
-					data = stripAnsi(data)
-					// Split data by newlines
-					let lines = data ? data.split("\n") : []
-					// Remove non-human readable characters from the first line
-					if (lines.length > 0) {
-						lines[0] = lines[0].replace(/[^\x20-\x7E]/g, "")
-					}
-					// Check if first two characters are the same, if so remove the first character
-					if (lines.length > 0 && lines[0].length >= 2 && lines[0][0] === lines[0][1]) {
-						lines[0] = lines[0].slice(1)
-					}
-					// Remove everything up to the first alphanumeric character for first two lines
-					if (lines.length > 0) {
-						lines[0] = lines[0].replace(/^[^a-zA-Z0-9]*/, "")
-					}
-					if (lines.length > 1) {
-						lines[1] = lines[1].replace(/^[^a-zA-Z0-9]*/, "")
-					}
-					// Join lines back
-					data = lines.join("\n")
-					isFirstChunk = false
-				} else {
-					data = stripAnsi(data)
-				}
-
-				// first few chunks could be the command being echoed back, so we must ignore
-				// note this means that 'echo' commands wont work
-				if (!didOutputNonCommand) {
-					const lines = data.split("\n")
-					for (let i = 0; i < lines.length; i++) {
-						if (command.includes(lines[i].trim())) {
-							lines.splice(i, 1)
-							i-- // Adjust index after removal
-						} else {
-							didOutputNonCommand = true
-							break
-						}
-					}
-					data = lines.join("\n")
-				}
-
-				// FIXME: right now it seems that data chunks returned to us from the shell integration stream contains random commas, which from what I can tell is not the expected behavior. There has to be a better solution here than just removing all commas.
-				data = data.replace(/,/g, "")
-
-				if (this.isListening) {
-					this.emitIfEol(data)
-				}
-			}
-
-			this.emitRemainingBufferIfListening()
-
-			this.emit("completed")
-			this.emit("continue")
-		} else {
-			terminal.sendText(command, true)
-			// For terminals without shell integration, we can't know when the command completes
-			// So we'll just emit the continue event after a delay
+		const streamOrNull = await this.runViaSendText(terminal, command)
+		if (!streamOrNull) {
+			// sendText was already called inside runViaSendText; stream tracking
+			// is not available (no shell integration events or timed out).
 			this.emit("completed")
 			this.emit("continue")
 			this.emit("no_shell_integration")
-			// setTimeout(() => {
-			// 	console.log(`Emitting continue after delay for terminal`)
-			// 	// can't emit completed since we don't if the command actually completed, it could still be running server
-			// }, 500) // Adjust this delay as needed
+			return
 		}
+
+		try {
+			await this.consumeStream(streamOrNull, command)
+		} catch (err) {
+			this.emit("error", err instanceof Error ? err : new Error(String(err)))
+			return
+		}
+		this.emitRemainingBufferIfListening()
+		this.emit("completed")
+		this.emit("continue")
+	}
+
+	private async consumeStream(stream: AsyncIterable<string>, command: string) {
+		let didOutputNonCommand = false
+		const expectedCommand = command.trim()
+		const commandLines = new Set(
+			expectedCommand.split("\n").map((l) => l.trim()).filter((l) => l.length > 0),
+		)
+		const commandLineList = [...commandLines]
+
+		for await (let data of stream) {
+			// Remove ANSI/OSC escape sequences (including VS Code shell integration sequences)
+			data = stripAnsi(data)
+
+			// The first chunks can include the echoed command line (prompt + command)
+			// which is not useful as "output". Remove it conservatively so commands like
+			// `echo hello` still work.
+			if (!didOutputNonCommand && expectedCommand) {
+				const lines = data.split("\n")
+				for (let i = 0; i < lines.length; i++) {
+					const rawLine = lines[i]
+					const cleaned = rawLine.replace(/^[\x00-\x1F]+/g, "").trim()
+
+					let isEchoedCommand = commandLines.has(cleaned)
+					if (!isEchoedCommand) {
+						for (const commandLine of commandLineList) {
+							if (!commandLine) {
+								continue
+							}
+							if (!cleaned.endsWith(commandLine)) {
+								continue
+							}
+							const prefix = cleaned.slice(0, cleaned.length - commandLine.length).trimEnd()
+							const lastChar = prefix.length > 0 ? prefix[prefix.length - 1] : ""
+							if (lastChar && "%$#>".includes(lastChar)) {
+								isEchoedCommand = true
+								break
+							}
+						}
+					}
+
+					if (isEchoedCommand) {
+						lines.splice(i, 1)
+						i--
+						continue
+					}
+
+					if (cleaned.length > 0) {
+						didOutputNonCommand = true
+						break
+					}
+				}
+				data = lines.join("\n")
+			}
+
+			if (this.isListening) {
+				this.emitIfEol(data)
+			}
+		}
+	}
+
+	/**
+	 * Send a command to the terminal via sendText and obtain the execution output
+	 * stream through the onDidStartTerminalShellExecution event.
+	 *
+	 * The shell handles continuation prompts naturally when text is sent directly,
+	 * and the shell integration events still fire correctly for completion tracking.
+	 *
+	 * @returns The async iterable stream from the execution, or null if the shell
+	 *          integration start event is unavailable or does not fire in time.
+	 */
+	private async runViaSendText(
+		terminal: vscode.Terminal,
+		command: string,
+	): Promise<AsyncIterable<string> | null> {
+		const onStart = (
+			vscode.window as vscode.Window
+		).onDidStartTerminalShellExecution
+
+		if (!onStart) {
+			// Event API not available (older VS Code); fall back to plain sendText.
+			terminal.sendText(command, true)
+			return null
+		}
+
+		// For freshly created terminals the shell may not yet be in readline
+		// mode (raw mode) when this method is called. Shell integration reports
+		// itself as available after detecting OSC 633 markers, but the
+		// shell's line editor typically activates slightly later. Sending text
+		// while the PTY is still in cooked mode causes the terminal driver to
+		// echo the characters, resulting in duplicate output.
+		//
+		// We first ensure CWD is detected (happens in precmd, right before the
+		// prompt) and then add a fixed delay to let readline finish activating.
+		// The flag is set by TerminalManager for freshly created terminals.
+		// Existing terminals already have readline active and skip the delay entirely.
+		if (this.newTerminal) {
+			try {
+				// Important: shellIntegration may not be defined yet in a brand new terminal.
+				// Waiting on cwd (reported from precmd) ensures the prompt is about to render.
+				await pWaitFor(() => !!terminal.shellIntegration?.cwd, {
+					timeout: 2000,
+					interval: 50,
+				})
+			} catch {
+				// Timed out; proceed anyway.
+			}
+			// CWD is reported from precmd which runs before the prompt is drawn
+			// and before readline enters raw mode. A brief delay bridges this gap.
+			await new Promise(resolve => setTimeout(resolve, 300))
+		}
+
+		return new Promise<AsyncIterable<string> | null>((resolve) => {
+			let settled = false
+
+			let disposable: vscode.Disposable | undefined
+			try {
+				disposable = onStart((e: any) => {
+					try {
+						if (!settled && e?.terminal === terminal && e?.execution) {
+							settled = true
+							disposable?.dispose()
+							clearTimeout(timer)
+							resolve(getOrCreateExecutionStream(e.execution))
+						}
+					} catch (err) {
+						console.error('runViaSendText: error in start listener', err)
+						if (!settled) {
+							settled = true
+							disposable?.dispose()
+							clearTimeout(timer)
+							resolve(null)
+						}
+					}
+				})
+			} catch (err) {
+				console.error('runViaSendText: failed to subscribe to shell execution start', err)
+				terminal.sendText(command, true)
+				resolve(null)
+				return
+			}
+
+			// Safety net: if the shell integration does not report execution start
+			// within 15 seconds, give up on stream tracking. The command has already
+			// been sent and may still be running; the caller will emit the appropriate
+			// fallback events.
+			const timer = setTimeout(() => {
+				if (!settled) {
+					settled = true
+					disposable?.dispose()
+					resolve(null)
+				}
+			}, 15_000)
+
+			terminal.sendText(command, true)
+		})
 	}
 
 	// Inspired by https://github.com/sindresorhus/execa/blob/main/lib/transform/split.js
@@ -161,6 +262,9 @@ export class TerminalProcess extends EventEmitter<TerminalProcessEvents> {
 		}
 	}
 
+	/**
+	 * @deprecated Kept for compatibility/future long-running command handling.
+	 */
 	continue() {
 		this.emitRemainingBufferIfListening()
 		this.isListening = false

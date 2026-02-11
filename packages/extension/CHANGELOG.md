@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.7.0 - 2026-02-11
+
+- feat(terminal): add newTerminal option for command execution
+- eat(terminal): enhance terminal command execution handling
+- fix(language-model): update registration of language model tools
+
 ## 0.6.4 - 2026-02-08
 
 - feat(ai_fetch_url): enhance model selection with toggle for Copilot models

@@ -9,11 +9,9 @@
 
 	SPDX-License-Identifier: Apache-2.0
 */
-
-import pWaitFor from "p-wait-for"
 import * as vscode from "vscode"
 import { arePathsEqual } from "../../utils/path"
-import { mergePromise, TerminalProcess, TerminalProcessResultPromise } from "./TerminalProcess"
+import { mergePromise, primeExecutionStream, TerminalProcess, TerminalProcessResultPromise } from "./TerminalProcess"
 import { TerminalInfo, TerminalRegistry } from "./TerminalRegistry"
 
 /*
@@ -99,14 +97,18 @@ export class TerminalManager {
 	private disposables: vscode.Disposable[] = []
 
 	private constructor() {
+		// Prime the execution stream as early as possible to avoid missing initial bytes.
+		// This intentionally does not consume the stream; it only ensures `read()` is called
+		// once per execution and cached for the command-specific consumer.
 		let disposable: vscode.Disposable | undefined
 		try {
-			disposable = (vscode.window as vscode.Window).onDidStartTerminalShellExecution?.(async (e) => {
-				// Creating a read stream here results in a more consistent output. This is most obvious when running the `date` command.
-				e?.execution?.read()
+			disposable = (vscode.window as vscode.Window).onDidStartTerminalShellExecution?.((e: any) => {
+				if (e?.execution) {
+					primeExecutionStream(e.execution)
+				}
 			})
-		} catch (error) {
-			// console.error("Error setting up onDidEndTerminalShellExecution", error)
+		} catch {
+			// Ignore
 		}
 		if (disposable) {
 			this.disposables.push(disposable)
@@ -140,12 +142,17 @@ export class TerminalManager {
 	}
 
 	runCommand(terminalInfo: TerminalInfo, command: string): TerminalProcessResultPromise {
+		const isFirstCommandInTerminal = terminalInfo.lastCommand === ""
 		terminalInfo.busy = true
 		terminalInfo.lastCommand = command
 		const process = new TerminalProcess()
+		process.newTerminal = isFirstCommandInTerminal
 		this.processes.set(terminalInfo.id, process)
 
 		process.once("completed", () => {
+			terminalInfo.busy = false
+		})
+		process.once("error", () => {
 			terminalInfo.busy = false
 		})
 
@@ -168,28 +175,21 @@ export class TerminalManager {
 			})
 		})
 
-		// if shell integration executeCommand is already available, run the command immediately
-		if (terminalInfo.terminal.shellIntegration?.executeCommand) {
-			process.waitForShellIntegration = false
-			console.log(`Running command in terminal ${terminalInfo.id} with shell integration:`, command)
-			process.run(terminalInfo.terminal, command)
-		} else {
-			// docs recommend waiting for shell integration to activate
-			console.log(`Waiting for shell integration in terminal ${terminalInfo.id}...`)
-			pWaitFor(() => typeof terminalInfo.terminal.shellIntegration?.executeCommand === "function", { timeout: 4000 }).finally(() => {
-				const existingProcess = this.processes.get(terminalInfo.id)
-				if (existingProcess && existingProcess.waitForShellIntegration) {
-					existingProcess.waitForShellIntegration = false
-					existingProcess.run(terminalInfo.terminal, command)
-				}
-			})
-		}
+		console.log(`Running command in terminal ${terminalInfo.id} via sendText:`, command)
+		process.run(terminalInfo.terminal, command)
 
 		return mergePromise(process, promise)
 	}
 
-	async getOrCreateTerminal(cwd: string): Promise<TerminalInfo> {
+	async getOrCreateTerminal(cwd: string, options?: { forceNew?: boolean }): Promise<TerminalInfo> {
 		const terminals = TerminalRegistry.getAllTerminals()
+
+		// Force a fresh terminal regardless of existing idle terminals.
+		if (options?.forceNew) {
+			const newTerminalInfo = TerminalRegistry.createTerminal(cwd)
+			this.terminalIds.add(newTerminalInfo.id)
+			return newTerminalInfo
+		}
 
 		// Find available terminal from our pool first (created for this task)
 		const matchingTerminal = terminals.find((t) => {
@@ -237,5 +237,6 @@ export class TerminalManager {
 		this.processes.clear()
 		this.disposables.forEach((disposable) => disposable.dispose())
 		this.disposables = []
+		TerminalManager.instance = null
 	}
 }
