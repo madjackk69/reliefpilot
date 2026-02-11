@@ -43,6 +43,243 @@ import { openGoogleContentPanelByUid } from './utils/google_search_content_panel
 import { initGoogleSessionStorage, registerGoogleSessionConfigWatcher } from './utils/google_search_content_sessions';
 import { statusBarActivity } from './utils/statusBar';
 
+// Guard to ensure language model tools are registered only once per extension host process.
+let lmToolsRegistered = false;
+let lmToolsRegistrationInProgress = false;
+
+async function ensureLanguageModelToolsRegistered(context: vscode.ExtensionContext, outputChannel: vscode.OutputChannel) {
+  if (lmToolsRegistered) {
+    outputChannel.appendLine('Language model tools already registered; skipping registration.');
+    return;
+  }
+
+  if (lmToolsRegistrationInProgress) {
+    // Wait briefly for concurrent registration to finish
+    const start = Date.now();
+    while (lmToolsRegistrationInProgress && Date.now() - start < 5000) {
+      // eslint-disable-next-line no-await-in-loop
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    if (lmToolsRegistered) {
+      outputChannel.appendLine('Language model tools registered by concurrent activation; skipping.');
+      return;
+    }
+  }
+
+  lmToolsRegistrationInProgress = true;
+  try {
+    // If the language model API isn't available yet, wait a short period for it to appear.
+    if (!vscode.lm) {
+      outputChannel.appendLine('Language model APIs unavailable; waiting briefly for availability...');
+      const maxTries = 25;
+      const delayMs = 200;
+      let tries = 0;
+      while (!vscode.lm && tries < maxTries) {
+        // eslint-disable-next-line no-await-in-loop
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+        tries++;
+      }
+    }
+
+    if (!vscode.lm) {
+      outputChannel.appendLine('Language model APIs unavailable after waiting; skipping language model tool registrations.');
+      return;
+    }
+
+    // Register tools. Each registration is guarded and logs failures separately so one failing registration
+    // doesn't prevent others from registering.
+    try {
+      const disposable = vscode.lm.registerTool('ask_report', new AskReportLanguageModelTool());
+      context.subscriptions.push(disposable);
+      outputChannel.appendLine('Registered language model tool: ask_report.');
+    } catch (err) {
+      outputChannel.appendLine(`Failed to register language model tool ask_report: ${err instanceof Error ? err.message : String(err)}`);
+    }
+
+    try {
+      const disposable = vscode.lm.registerTool('code_checker', new CodeCheckerLanguageModelTool());
+      context.subscriptions.push(disposable);
+      outputChannel.appendLine('Registered language model tool: code_checker.');
+    } catch (err) {
+      outputChannel.appendLine(`Failed to register language model tool code_checker: ${err instanceof Error ? err.message : String(err)}`);
+    }
+
+    try {
+      const disposable = vscode.lm.registerTool('focus_editor', new FocusEditorLanguageModelTool());
+      context.subscriptions.push(disposable);
+      outputChannel.appendLine('Registered language model tool: focus_editor.');
+    } catch (err) {
+      outputChannel.appendLine(`Failed to register language model tool focus_editor: ${err instanceof Error ? err.message : String(err)}`);
+    }
+
+    try {
+      const disposable = vscode.lm.registerTool('execute_command', new ExecuteCommandLanguageModelTool());
+      context.subscriptions.push(disposable);
+      outputChannel.appendLine('Registered language model tool: execute_command.');
+    } catch (err) {
+      outputChannel.appendLine(`Failed to register language model tool execute_command: ${err instanceof Error ? err.message : String(err)}`);
+    }
+
+    try {
+      const disposable = vscode.lm.registerTool('ripgrep', new RipgrepLanguageModelTool());
+      context.subscriptions.push(disposable);
+      outputChannel.appendLine('Registered language model tool: ripgrep.');
+    } catch (err) {
+      outputChannel.appendLine(`Failed to register language model tool ripgrep: ${err instanceof Error ? err.message : String(err)}`);
+    }
+
+    try {
+      const disposable = vscode.lm.registerTool('get_terminal_output', new GetTerminalOutputLanguageModelTool());
+      context.subscriptions.push(disposable);
+      outputChannel.appendLine('Registered language model tool: get_terminal_output.');
+    } catch (err) {
+      outputChannel.appendLine(`Failed to register language model tool get_terminal_output: ${err instanceof Error ? err.message : String(err)}`);
+    }
+
+    try {
+      const disposable = vscode.lm.registerTool('ai_fetch_url', new AiFetchUrlLanguageModelTool());
+      context.subscriptions.push(disposable);
+      outputChannel.appendLine('Registered language model tool: ai_fetch_url.');
+    } catch (err) {
+      outputChannel.appendLine(`Failed to register language model tool ai_fetch_url: ${err instanceof Error ? err.message : String(err)}`);
+    }
+
+    try {
+      const disposable = vscode.lm.registerTool('context7_resolve-library-id', new Context7ResolveLibraryIdTool());
+      context.subscriptions.push(disposable);
+      outputChannel.appendLine('Registered language model tool: context7_resolve-library-id.');
+    } catch (err) {
+      outputChannel.appendLine(`Failed to register language model tool context7_resolve-library-id: ${err instanceof Error ? err.message : String(err)}`);
+    }
+
+    try {
+      const disposable = vscode.lm.registerTool('context7_get-library-docs', new Context7GetLibraryDocsTool());
+      context.subscriptions.push(disposable);
+      outputChannel.appendLine('Registered language model tool: context7_get-library-docs.');
+    } catch (err) {
+      outputChannel.appendLine(`Failed to register language model tool context7_get-library-docs: ${err instanceof Error ? err.message : String(err)}`);
+    }
+
+    try {
+      const disposable = vscode.lm.registerTool('github_search_repositories', new GithubSearchRepositoriesTool());
+      context.subscriptions.push(disposable);
+      outputChannel.appendLine('Registered language model tool: github_search_repositories.');
+    } catch (err) {
+      outputChannel.appendLine(`Failed to register language model tool github_search_repositories: ${err instanceof Error ? err.message : String(err)}`);
+    }
+
+    try {
+      const disposable = vscode.lm.registerTool('github_get_file_contents', new GithubGetFileContentsTool());
+      context.subscriptions.push(disposable);
+      outputChannel.appendLine('Registered language model tool: github_get_file_contents.');
+    } catch (err) {
+      outputChannel.appendLine(`Failed to register language model tool github_get_file_contents: ${err instanceof Error ? err.message : String(err)}`);
+    }
+
+    try {
+      const disposable = vscode.lm.registerTool('github_get_directory_contents', new GithubGetDirectoryContentsTool());
+      context.subscriptions.push(disposable);
+      outputChannel.appendLine('Registered language model tool: github_get_directory_contents.');
+    } catch (err) {
+      outputChannel.appendLine(`Failed to register language model tool github_get_directory_contents: ${err instanceof Error ? err.message : String(err)}`);
+    }
+
+    try {
+      const disposable = vscode.lm.registerTool('github_search_code', new GithubSearchCodeTool());
+      context.subscriptions.push(disposable);
+      outputChannel.appendLine('Registered language model tool: github_search_code.');
+    } catch (err) {
+      outputChannel.appendLine(`Failed to register language model tool github_search_code: ${err instanceof Error ? err.message : String(err)}`);
+    }
+
+    try {
+      const disposable = vscode.lm.registerTool('google_search', new GoogleSearchTool());
+      context.subscriptions.push(disposable);
+      outputChannel.appendLine('Registered language model tool: google_search.');
+    } catch (err) {
+      outputChannel.appendLine(`Failed to register language model tool google_search: ${err instanceof Error ? err.message : String(err)}`);
+    }
+
+    try {
+      const disposable = vscode.lm.registerTool('felo_search', new FeloSearchTool());
+      context.subscriptions.push(disposable);
+      outputChannel.appendLine('Registered language model tool: felo_search.');
+    } catch (err) {
+      outputChannel.appendLine(`Failed to register language model tool felo_search: ${err instanceof Error ? err.message : String(err)}`);
+    }
+
+    try {
+      const disposable = vscode.lm.registerTool('duckduckgo_search', new DuckDuckGoSearchTool());
+      context.subscriptions.push(disposable);
+      outputChannel.appendLine('Registered language model tool: duckduckgo_search.');
+    } catch (err) {
+      outputChannel.appendLine(`Failed to register language model tool duckduckgo_search: ${err instanceof Error ? err.message : String(err)}`);
+    }
+
+    try {
+      const disposable = vscode.lm.registerTool('github_list_releases', new GithubListReleasesTool());
+      context.subscriptions.push(disposable);
+      outputChannel.appendLine('Registered language model tool: github_list_releases.');
+    } catch (err) {
+      outputChannel.appendLine(`Failed to register language model tool github_list_releases: ${err instanceof Error ? err.message : String(err)}`);
+    }
+
+    try {
+      const disposable = vscode.lm.registerTool('github_get_latest_release', new GithubGetLatestReleaseTool());
+      context.subscriptions.push(disposable);
+      outputChannel.appendLine('Registered language model tool: github_get_latest_release.');
+    } catch (err) {
+      outputChannel.appendLine(`Failed to register language model tool github_get_latest_release: ${err instanceof Error ? err.message : String(err)}`);
+    }
+
+    try {
+      const disposable = vscode.lm.registerTool('github_search_issues', new GithubSearchIssuesTool());
+      context.subscriptions.push(disposable);
+      outputChannel.appendLine('Registered language model tool: github_search_issues.');
+    } catch (err) {
+      outputChannel.appendLine(`Failed to register language model tool github_search_issues: ${err instanceof Error ? err.message : String(err)}`);
+    }
+
+    try {
+      const disposable = vscode.lm.registerTool('github_list_issues', new GithubListIssuesTool());
+      context.subscriptions.push(disposable);
+      outputChannel.appendLine('Registered language model tool: github_list_issues.');
+    } catch (err) {
+      outputChannel.appendLine(`Failed to register language model tool github_list_issues: ${err instanceof Error ? err.message : String(err)}`);
+    }
+
+    try {
+      const disposable = vscode.lm.registerTool('github_issue_read', new GithubIssueReadTool());
+      context.subscriptions.push(disposable);
+      outputChannel.appendLine('Registered language model tool: github_issue_read.');
+    } catch (err) {
+      outputChannel.appendLine(`Failed to register language model tool github_issue_read: ${err instanceof Error ? err.message : String(err)}`);
+    }
+
+    try {
+      const disposable = vscode.lm.registerTool('github_list_pull_requests', new GithubListPullRequestsTool());
+      context.subscriptions.push(disposable);
+      outputChannel.appendLine('Registered language model tool: github_list_pull_requests.');
+    } catch (err) {
+      outputChannel.appendLine(`Failed to register language model tool github_list_pull_requests: ${err instanceof Error ? err.message : String(err)}`);
+    }
+
+    try {
+      const disposable = vscode.lm.registerTool('github_pull_request_read', new GithubPullRequestReadTool());
+      context.subscriptions.push(disposable);
+      outputChannel.appendLine('Registered language model tool: github_pull_request_read.');
+    } catch (err) {
+      outputChannel.appendLine(`Failed to register language model tool github_pull_request_read: ${err instanceof Error ? err.message : String(err)}`);
+    }
+
+    // Mark as registered to avoid duplicate attempts in the same extension-host process
+    lmToolsRegistered = true;
+    outputChannel.appendLine('Language model tool registration complete.');
+  } finally {
+    lmToolsRegistrationInProgress = false;
+  }
+}
+
 const STATUS_MENU_COMMAND = 'reliefpilot.status.menu';
 const SHOW_ASK_REPORT_HISTORY_COMMAND = 'reliefpilot.askReport.showHistory';
 const HALT_FOR_FEEDBACK_COMMAND = 'reliefpilot.haltForFeedback';
@@ -415,303 +652,7 @@ export const activate = async (context: vscode.ExtensionContext) => {
   registerGoogleSessionConfigWatcher(context);
 
   if (vscode.lm) {
-    try {
-      const disposable = vscode.lm.registerTool(
-        'ask_report',
-        new AskReportLanguageModelTool(),
-      );
-      context.subscriptions.push(disposable);
-      outputChannel.appendLine('Registered language model tool: ask_report.');
-    } catch (err) {
-      outputChannel.appendLine(
-        `Failed to register language model tool ask_report: ${err instanceof Error ? err.message : String(err)}`,
-      );
-    }
-
-    try {
-      const disposable = vscode.lm.registerTool(
-        'code_checker',
-        new CodeCheckerLanguageModelTool(),
-      );
-      context.subscriptions.push(disposable);
-      outputChannel.appendLine('Registered language model tool: code_checker.');
-    } catch (err) {
-      outputChannel.appendLine(
-        `Failed to register language model tool code_checker: ${err instanceof Error ? err.message : String(err)}`,
-      );
-    }
-
-    try {
-      const disposable = vscode.lm.registerTool(
-        'focus_editor',
-        new FocusEditorLanguageModelTool(),
-      );
-      context.subscriptions.push(disposable);
-      outputChannel.appendLine('Registered language model tool: focus_editor.');
-    } catch (err) {
-      outputChannel.appendLine(
-        `Failed to register language model tool focus_editor: ${err instanceof Error ? err.message : String(err)}`,
-      );
-    }
-
-    try {
-      const disposable = vscode.lm.registerTool(
-        'execute_command',
-        new ExecuteCommandLanguageModelTool(),
-      );
-      context.subscriptions.push(disposable);
-      outputChannel.appendLine('Registered language model tool: execute_command.');
-    } catch (err) {
-      outputChannel.appendLine(
-        `Failed to register language model tool execute_command: ${err instanceof Error ? err.message : String(err)}`,
-      );
-    }
-
-    try {
-      const disposable = vscode.lm.registerTool(
-        'ripgrep',
-        new RipgrepLanguageModelTool(),
-      );
-      context.subscriptions.push(disposable);
-      outputChannel.appendLine('Registered language model tool: ripgrep.');
-    } catch (err) {
-      outputChannel.appendLine(
-        `Failed to register language model tool ripgrep: ${err instanceof Error ? err.message : String(err)}`,
-      );
-    }
-
-    try {
-      const disposable = vscode.lm.registerTool(
-        'get_terminal_output',
-        new GetTerminalOutputLanguageModelTool(),
-      );
-      context.subscriptions.push(disposable);
-      outputChannel.appendLine('Registered language model tool: get_terminal_output.');
-    } catch (err) {
-      outputChannel.appendLine(
-        `Failed to register language model tool get_terminal_output: ${err instanceof Error ? err.message : String(err)}`,
-      );
-    }
-
-    try {
-      const disposable = vscode.lm.registerTool(
-        'ai_fetch_url',
-        new AiFetchUrlLanguageModelTool(),
-      );
-      context.subscriptions.push(disposable);
-      outputChannel.appendLine('Registered language model tool: ai_fetch_url.');
-    } catch (err) {
-      outputChannel.appendLine(
-        `Failed to register language model tool ai_fetch_url: ${err instanceof Error ? err.message : String(err)}`,
-      );
-    }
-
-    try {
-      const disposable = vscode.lm.registerTool(
-        'context7_resolve-library-id',
-        new Context7ResolveLibraryIdTool(),
-      );
-      context.subscriptions.push(disposable);
-      outputChannel.appendLine('Registered language model tool: context7_resolve-library-id.');
-    } catch (err) {
-      outputChannel.appendLine(
-        `Failed to register language model tool context7_resolve-library-id: ${err instanceof Error ? err.message : String(err)}`,
-      );
-    }
-
-    try {
-      const disposable = vscode.lm.registerTool(
-        'context7_get-library-docs',
-        new Context7GetLibraryDocsTool(),
-      );
-      context.subscriptions.push(disposable);
-      outputChannel.appendLine('Registered language model tool: context7_get-library-docs.');
-    } catch (err) {
-      outputChannel.appendLine(
-        `Failed to register language model tool context7_get-library-docs: ${err instanceof Error ? err.message : String(err)}`,
-      );
-    }
-
-    try {
-      const disposable = vscode.lm.registerTool(
-        'github_search_repositories',
-        new GithubSearchRepositoriesTool(),
-      );
-      context.subscriptions.push(disposable);
-      outputChannel.appendLine('Registered language model tool: github_search_repositories.');
-    } catch (err) {
-      outputChannel.appendLine(
-        `Failed to register language model tool github_search_repositories: ${err instanceof Error ? err.message : String(err)}`,
-      );
-    }
-
-    try {
-      const disposable = vscode.lm.registerTool(
-        'github_get_file_contents',
-        new GithubGetFileContentsTool(),
-      );
-      context.subscriptions.push(disposable);
-      outputChannel.appendLine('Registered language model tool: github_get_file_contents.');
-    } catch (err) {
-      outputChannel.appendLine(
-        `Failed to register language model tool github_get_file_contents: ${err instanceof Error ? err.message : String(err)}`,
-      );
-    }
-
-    try {
-      const disposable = vscode.lm.registerTool(
-        'github_get_directory_contents',
-        new GithubGetDirectoryContentsTool(),
-      );
-      context.subscriptions.push(disposable);
-      outputChannel.appendLine('Registered language model tool: github_get_directory_contents.');
-    } catch (err) {
-      outputChannel.appendLine(
-        `Failed to register language model tool github_get_directory_contents: ${err instanceof Error ? err.message : String(err)}`,
-      );
-    }
-
-    try {
-      const disposable = vscode.lm.registerTool(
-        'github_search_code',
-        new GithubSearchCodeTool(),
-      );
-      context.subscriptions.push(disposable);
-      outputChannel.appendLine('Registered language model tool: github_search_code.');
-    } catch (err) {
-      outputChannel.appendLine(
-        `Failed to register language model tool github_search_code: ${err instanceof Error ? err.message : String(err)}`,
-      );
-    }
-
-    try {
-      const disposable = vscode.lm.registerTool(
-        'google_search',
-        new GoogleSearchTool(),
-      );
-      context.subscriptions.push(disposable);
-      outputChannel.appendLine('Registered language model tool: google_search.');
-    } catch (err) {
-      outputChannel.appendLine(
-        `Failed to register language model tool google_search: ${err instanceof Error ? err.message : String(err)}`,
-      );
-    }
-    try {
-      const disposable = vscode.lm.registerTool(
-        'felo_search',
-        new FeloSearchTool(),
-      );
-      context.subscriptions.push(disposable);
-      outputChannel.appendLine('Registered language model tool: felo_search.');
-    } catch (err) {
-      outputChannel.appendLine(
-        `Failed to register language model tool felo_search: ${err instanceof Error ? err.message : String(err)}`,
-      );
-    }
-
-    try {
-      const disposable = vscode.lm.registerTool(
-        'duckduckgo_search',
-        new DuckDuckGoSearchTool(),
-      );
-      context.subscriptions.push(disposable);
-      outputChannel.appendLine('Registered language model tool: duckduckgo_search.');
-    } catch (err) {
-      outputChannel.appendLine(
-        `Failed to register language model tool duckduckgo_search: ${err instanceof Error ? err.message : String(err)}`,
-      );
-    }
-
-    try {
-      const disposable = vscode.lm.registerTool(
-        'github_list_releases',
-        new GithubListReleasesTool(),
-      );
-      context.subscriptions.push(disposable);
-      outputChannel.appendLine('Registered language model tool: github_list_releases.');
-    } catch (err) {
-      outputChannel.appendLine(
-        `Failed to register language model tool github_list_releases: ${err instanceof Error ? err.message : String(err)}`,
-      );
-    }
-
-    try {
-      const disposable = vscode.lm.registerTool(
-        'github_get_latest_release',
-        new GithubGetLatestReleaseTool(),
-      );
-      context.subscriptions.push(disposable);
-      outputChannel.appendLine('Registered language model tool: github_get_latest_release.');
-    } catch (err) {
-      outputChannel.appendLine(
-        `Failed to register language model tool github_get_latest_release: ${err instanceof Error ? err.message : String(err)}`,
-      );
-    }
-
-    try {
-      const disposable = vscode.lm.registerTool(
-        'github_search_issues',
-        new GithubSearchIssuesTool(),
-      );
-      context.subscriptions.push(disposable);
-      outputChannel.appendLine('Registered language model tool: github_search_issues.');
-    } catch (err) {
-      outputChannel.appendLine(
-        `Failed to register language model tool github_search_issues: ${err instanceof Error ? err.message : String(err)}`,
-      );
-    }
-
-    try {
-      const disposable = vscode.lm.registerTool(
-        'github_list_issues',
-        new GithubListIssuesTool(),
-      );
-      context.subscriptions.push(disposable);
-      outputChannel.appendLine('Registered language model tool: github_list_issues.');
-    } catch (err) {
-      outputChannel.appendLine(
-        `Failed to register language model tool github_list_issues: ${err instanceof Error ? err.message : String(err)}`,
-      );
-    }
-
-    try {
-      const disposable = vscode.lm.registerTool(
-        'github_issue_read',
-        new GithubIssueReadTool(),
-      );
-      context.subscriptions.push(disposable);
-      outputChannel.appendLine('Registered language model tool: github_issue_read.');
-    } catch (err) {
-      outputChannel.appendLine(
-        `Failed to register language model tool github_issue_read: ${err instanceof Error ? err.message : String(err)}`,
-      );
-    }
-
-    try {
-      const disposable = vscode.lm.registerTool(
-        'github_list_pull_requests',
-        new GithubListPullRequestsTool(),
-      );
-      context.subscriptions.push(disposable);
-      outputChannel.appendLine('Registered language model tool: github_list_pull_requests.');
-    } catch (err) {
-      outputChannel.appendLine(
-        `Failed to register language model tool github_list_pull_requests: ${err instanceof Error ? err.message : String(err)}`,
-      );
-    }
-
-    try {
-      const disposable = vscode.lm.registerTool(
-        'github_pull_request_read',
-        new GithubPullRequestReadTool(),
-      );
-      context.subscriptions.push(disposable);
-      outputChannel.appendLine('Registered language model tool: github_pull_request_read.');
-    } catch (err) {
-      outputChannel.appendLine(
-        `Failed to register language model tool github_pull_request_read: ${err instanceof Error ? err.message : String(err)}`,
-      );
-    }
+    await ensureLanguageModelToolsRegistered(context, outputChannel);
   } else {
     outputChannel.appendLine('Language model APIs unavailable; skipping language model tool registrations.');
   }
