@@ -29,6 +29,14 @@ export const executeCommandSchema = z.object({
   command: z.string().describe("Command to execute in an integrated terminal"),
   // Optional override for CWD
   customCwd: z.string().optional().describe("Working directory to run the command in (defaults to workspace root)"),
+  // Force a fresh terminal instance even if an existing one is idle
+  newTerminal: z
+    .boolean()
+    .optional()
+    .default(false)
+    .describe(
+      "If true, always create a new terminal for this command."
+    ),
   // Destructive/read-only hint controls confirmation UI
   destructiveFlag: z
     .boolean()
@@ -71,7 +79,8 @@ export class ExecuteCommandTool {
     customCwd?: string,
     destructiveFlag: boolean = true,
     background: boolean = false,
-    timeout: number = 300000
+    timeout: number = 300000,
+    newTerminal: boolean = false
   ): Promise<[userRejected: boolean, ToolResponse]> {
     // Read extension setting that optionally forces confirmation for read-only commands
     const confirmNonDestructiveCommands = vscode.workspace
@@ -102,7 +111,7 @@ export class ExecuteCommandTool {
     }
 
     // Terminal lifecycle and event wiring
-    const terminalInfo = await this.terminalManager.getOrCreateTerminal(customCwd || this.cwd)
+    const terminalInfo = await this.terminalManager.getOrCreateTerminal(customCwd || this.cwd, { forceNew: newTerminal })
     terminalInfo.terminal.show() // Ensures visibility; avoids known empty-space glitch on first open
     const process = this.terminalManager.runCommand(terminalInfo, command)
 
@@ -199,6 +208,7 @@ export async function executeCommandToolHandler(params: z.infer<typeof executeCo
       params.destructiveFlag,
       params.background,
       params.timeout,
+      params.newTerminal,
     )
 
     return {
@@ -298,6 +308,9 @@ export class ExecuteCommandLanguageModelTool implements LanguageModelTool<Execut
     const input = options.input ?? {}
     const command = typeof input.command === "string" ? input.command : undefined
     const customCwd = typeof input.customCwd === "string" ? input.customCwd : undefined
+    // Only show this field when explicitly provided by the agent/model.
+    const hasNewTerminal = Object.prototype.hasOwnProperty.call(input, "newTerminal")
+    const newTerminal = hasNewTerminal && typeof input.newTerminal === "boolean" ? input.newTerminal : undefined
     const destructiveFlag = typeof input.destructiveFlag === "boolean" ? input.destructiveFlag : undefined
     const background = typeof input.background === "boolean" ? input.background : undefined
     const timeout = typeof (input as any).timeout === "number" ? (input as any).timeout : undefined
@@ -339,6 +352,7 @@ export class ExecuteCommandLanguageModelTool implements LanguageModelTool<Execut
 
     // Keep remaining fields compact; these are single-line values.
     if (customCwd) md.appendMarkdown(`- CWD: ${inlineCode(customCwd)}  \n`)
+    if (typeof newTerminal === "boolean") md.appendMarkdown(`- New terminal: ${inlineCode(String(newTerminal))}  \n`)
     if (typeof destructiveFlag === "boolean") md.appendMarkdown(`- Destructive: ${inlineCode(String(destructiveFlag))}  \n`)
     if (typeof background === "boolean") md.appendMarkdown(`- Background: ${inlineCode(String(background))}  \n`)
     if (typeof timeout === "number") md.appendMarkdown(`- Timeout: ${inlineCode(`${timeout}ms`)}  \n`)

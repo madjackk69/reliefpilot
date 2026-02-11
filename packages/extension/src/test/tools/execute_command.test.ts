@@ -278,5 +278,24 @@ suite('Execute Command Tool Test Suite', function () {
         assert.match(response.text, /show terminal ID/, 'Output should contain command result');
       }
     });
+
+    test('newTerminal=true should always create a new terminal', async function () {
+      console.log('Running newTerminal flag test');
+
+      const [, response1] = await tool.execute('echo "new terminal 1"', undefined, false, false, 300000, true);
+      const idMatch1 = response1.text.match(/terminal \(id: "?(\d+)"?\)/);
+      assert.ok(idMatch1, 'First response should include terminal ID');
+      const tid1 = parseInt(idMatch1[1], 10);
+
+      // Give the terminal a moment to settle so reuse would be possible if the flag were ignored.
+      await new Promise(r => setTimeout(r, 300));
+
+      const [, response2] = await tool.execute('echo "new terminal 2"', undefined, false, false, 300000, true);
+      const idMatch2 = response2.text.match(/terminal \(id: "?(\d+)"?\)/);
+      assert.ok(idMatch2, 'Second response should include terminal ID');
+      const tid2 = parseInt(idMatch2[1], 10);
+
+      assert.notStrictEqual(tid1, tid2, 'newTerminal=true should force a new terminal id each time');
+    });
   });
 });

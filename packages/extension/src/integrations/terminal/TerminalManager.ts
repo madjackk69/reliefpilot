@@ -181,8 +181,15 @@ export class TerminalManager {
 		return mergePromise(process, promise)
 	}
 
-	async getOrCreateTerminal(cwd: string): Promise<TerminalInfo> {
+	async getOrCreateTerminal(cwd: string, options?: { forceNew?: boolean }): Promise<TerminalInfo> {
 		const terminals = TerminalRegistry.getAllTerminals()
+
+		// Force a fresh terminal regardless of existing idle terminals.
+		if (options?.forceNew) {
+			const newTerminalInfo = TerminalRegistry.createTerminal(cwd)
+			this.terminalIds.add(newTerminalInfo.id)
+			return newTerminalInfo
+		}
 
 		// Find available terminal from our pool first (created for this task)
 		const matchingTerminal = terminals.find((t) => {
