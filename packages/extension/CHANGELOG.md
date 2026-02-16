@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.8.0 - 2026-02-17
+
+- feat(linkup): add Linkup search functionality and API integration
+
 ## 0.7.1 - 2026-02-11
 
 - fix(terminal): remove timeout for execution stream tracking
