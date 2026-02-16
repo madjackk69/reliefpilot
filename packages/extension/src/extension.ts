@@ -24,6 +24,7 @@ import { GithubSearchCodeTool } from './tools/github_search_code';
 import { GithubSearchIssuesTool } from './tools/github_search_issues';
 import { GithubSearchRepositoriesTool } from './tools/github_search_repositories';
 import { GoogleSearchTool } from './tools/google_search';
+import { LinkupSearchTool } from './tools/linkup_search';
 import { openAiFetchProgressPanelByUid } from './utils/ai_fetch_progress';
 import { initAiFetchSessionStorage, registerAiFetchSessionConfigWatcher } from './utils/ai_fetch_sessions';
 import { askReportHistory, formatTimestampSeconds, initAskReportHistoryStorage, registerAskReportHistoryConfigWatcher } from './utils/ask_report_history';
@@ -41,6 +42,9 @@ import { initGithubSessionStorage, registerGithubSessionConfigWatcher } from './
 import { hasGoogleApiKey, hasGoogleSearchEngineId, initGoogleAuth, setupOrUpdateGoogleApiKey, setupOrUpdateGoogleSearchEngineId } from './utils/google_search_auth';
 import { openGoogleContentPanelByUid } from './utils/google_search_content_panel';
 import { initGoogleSessionStorage, registerGoogleSessionConfigWatcher } from './utils/google_search_content_sessions';
+import { hasLinkupApiKey, initLinkupAuth, setupOrUpdateLinkupApiKey } from './utils/linkup_search_auth';
+import { openLinkupContentPanelByUid } from './utils/linkup_search_content_panel';
+import { initLinkupSessionStorage, registerLinkupSessionConfigWatcher } from './utils/linkup_search_content_sessions';
 import { statusBarActivity } from './utils/statusBar';
 
 // Guard to ensure language model tools are registered only once per extension host process.
@@ -201,6 +205,14 @@ async function ensureLanguageModelToolsRegistered(context: vscode.ExtensionConte
     }
 
     try {
+      const disposable = vscode.lm.registerTool('linkup_search', new LinkupSearchTool());
+      context.subscriptions.push(disposable);
+      outputChannel.appendLine('Registered language model tool: linkup_search.');
+    } catch (err) {
+      outputChannel.appendLine(`Failed to register language model tool linkup_search: ${err instanceof Error ? err.message : String(err)}`);
+    }
+
+    try {
       const disposable = vscode.lm.registerTool('felo_search', new FeloSearchTool());
       context.subscriptions.push(disposable);
       outputChannel.appendLine('Registered language model tool: felo_search.');
@@ -312,6 +324,7 @@ async function showReliefPilotMenu() {
   const githubTokenExists = await hasGitHubToken();
   const googleApiKeyExists = await hasGoogleApiKey();
   const googleSearchEngineIdExists = await hasGoogleSearchEngineId();
+  const linkupApiKeyExists = await hasLinkupApiKey();
   const tokenMenuLabel = context7TokenExists
     ? 'Update API-token `context7`'
     : 'Setup API-token `context7`';
@@ -324,6 +337,9 @@ async function showReliefPilotMenu() {
   const googleSearchEngineIdMenuLabel = googleSearchEngineIdExists
     ? 'Update API-token `GOOGLE_SEARCH_ENGINE_ID`'
     : 'Setup API-token `GOOGLE_SEARCH_ENGINE_ID`';
+  const linkupApiKeyMenuLabel = linkupApiKeyExists
+    ? 'Update API-token `LINKUP_API_KEY`'
+    : 'Setup API-token `LINKUP_API_KEY`';
 
   const items: vscode.QuickPickItem[] = [
     {
@@ -362,6 +378,10 @@ async function showReliefPilotMenu() {
       label: googleSearchEngineIdMenuLabel,
       description: googleSearchEngineIdExists ? 'Change stored Google API token `GOOGLE_SEARCH_ENGINE_ID`' : 'Store a new Google API token `GOOGLE_SEARCH_ENGINE_ID` securely',
     },
+    {
+      label: linkupApiKeyMenuLabel,
+      description: linkupApiKeyExists ? 'Change stored Linkup API token `LINKUP_API_KEY`' : 'Store a new Linkup API token `LINKUP_API_KEY` securely',
+    },
   ];
 
   const pick = await vscode.window.showQuickPick(items, {
@@ -393,6 +413,8 @@ async function showReliefPilotMenu() {
     await setupOrUpdateGoogleApiKey();
   } else if (pick.label === googleSearchEngineIdMenuLabel) {
     await setupOrUpdateGoogleSearchEngineId();
+  } else if (pick.label === linkupApiKeyMenuLabel) {
+    await setupOrUpdateLinkupApiKey();
   }
 }
 
@@ -634,6 +656,7 @@ export const activate = async (context: vscode.ExtensionContext) => {
   initContext7Auth(context);
   initGitHubAuth(context);
   initGoogleAuth(context);
+  initLinkupAuth(context);
   // Initialize ask_report history storage (load from workspace storage)
   initAskReportHistoryStorage(context);
   // Initialize session storage
@@ -643,6 +666,7 @@ export const activate = async (context: vscode.ExtensionContext) => {
   initFeloSessionStorage(context);
   initGithubSessionStorage(context);
   initGoogleSessionStorage(context);
+  initLinkupSessionStorage(context);
   // Watchers for dynamic limit application on configuration change
   registerAiFetchSessionConfigWatcher(context);
   registerContext7SessionConfigWatcher(context);
@@ -650,6 +674,7 @@ export const activate = async (context: vscode.ExtensionContext) => {
   registerFeloSessionConfigWatcher(context);
   registerGithubSessionConfigWatcher(context);
   registerGoogleSessionConfigWatcher(context);
+  registerLinkupSessionConfigWatcher(context);
 
   if (vscode.lm) {
     await ensureLanguageModelToolsRegistered(context, outputChannel);
@@ -673,6 +698,7 @@ export const activate = async (context: vscode.ExtensionContext) => {
     vscode.commands.registerCommand('reliefpilot.github.setupToken', () => setupOrUpdateGitHubToken()),
     vscode.commands.registerCommand('reliefpilot.google.setupApiKey', () => setupOrUpdateGoogleApiKey()),
     vscode.commands.registerCommand('reliefpilot.google.setupSearchEngineId', () => setupOrUpdateGoogleSearchEngineId()),
+    vscode.commands.registerCommand('reliefpilot.linkup.setupApiKey', () => setupOrUpdateLinkupApiKey()),
   );
   registerSpecsModeCommand(context);
   showServerStatusBar();
@@ -702,6 +728,13 @@ export const activate = async (context: vscode.ExtensionContext) => {
   context.subscriptions.push(
     vscode.commands.registerCommand('reliefpilot.google.showContent', async (args?: { uid?: string }) => {
       await openGoogleContentPanelByUid(args?.uid ?? '');
+    })
+  );
+
+  // Command: open Linkup content webview (shown from Markdown command link for Linkup tool)
+  context.subscriptions.push(
+    vscode.commands.registerCommand('reliefpilot.linkup.showContent', async (args?: { uid?: string }) => {
+      await openLinkupContentPanelByUid(args?.uid ?? '');
     })
   );
 

@@ -3,7 +3,7 @@
   "displayName": "Relief Pilot",
   "description": "A Swiss Army knife for AI agents in VS Code: safer tool calling, human-in-the-loop approvals, and smarter doc fetching to boost productivity and save you money.",
   "publisher": "ivan-mezentsev",
-  "version": "0.7.1",
+  "version": "0.8.0",
   "type": "commonjs",
   "icon": "icon.png",
   "categories": [
@@ -169,6 +169,13 @@
           "minimum": 1,
           "maximum": 1000,
           "description": "Maximum number of google session history entries to keep."
+        },
+        "reliefpilot.linkupHistoryMaxEntries": {
+          "type": "number",
+          "default": 20,
+          "minimum": 1,
+          "maximum": 1000,
+          "description": "Maximum number of linkup session history entries to keep."
         },
         "reliefpilot.duckduckgoHistoryMaxEntries": {
           "type": "number",
@@ -960,6 +967,53 @@
             "sort": {
               "type": "string",
               "description": "Sorting method for search results. Options: 'relevance' (default) or 'date' (most recent first)."
+            }
+          },
+          "required": [
+            "query"
+          ]
+        }
+      },
+      {
+        "name": "linkup_search",
+        "displayName": "Linkup: Search web",
+        "modelDescription": "Search the web via Linkup API and return relevant results in Markdown.",
+        "canBeReferencedInPrompt": true,
+        "toolReferenceName": "linkup_search",
+        "icon": "icon.png",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "query": {
+              "type": "string",
+              "description": "Natural-language search query."
+            },
+            "onlySearchTheseDomains": {
+              "type": "array",
+              "description": "Only search these domains (optional).",
+              "items": {
+                "type": "string"
+              }
+            },
+            "dateFilter": {
+              "type": "object",
+              "description": "Optional date filter.",
+              "properties": {
+                "fromDate": {
+                  "type": "string",
+                  "description": "Start date in YYYY-MM-DD format."
+                },
+                "toDate": {
+                  "type": "string",
+                  "description": "End date in YYYY-MM-DD format."
+                }
+              }
+            },
+            "maxResults": {
+              "type": "integer",
+              "description": "Maximum number of results to return (default: 5).",
+              "default": 5,
+              "minimum": 1
             }
           },
           "required": [
