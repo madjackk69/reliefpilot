@@ -64,7 +64,7 @@ If a tool execution is declined, the error message will include your feedback
   - **ai_fetch_url**: Fetching and extracting web content data using a sub-agent
 - Search Engines:
   - **duckduckgo-search**: Search the web using DuckDuckGo with HTML scraping
-  - **google_search**: Search Google and return relevant results using the Programmable Search Engine
+  - **google_search**: Search Google using the Programmable Search Engine (soon EOL - announced by Google)
   - **felo_search**: AI-powered search with contextual responses for up-to-date technical information (releases, advisories, migrations, benchmarks, community insights)
 - Searching and Extracting Documentation in Context7
   - **context7_resolve-library-id**
