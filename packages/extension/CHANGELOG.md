@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.9.0 - 2026-02-21
+
+- feat(exa): add Exa search tool and API integration
+
 ## 0.8.0 - 2026-02-17
 
 - feat(linkup): add Linkup search functionality and API integration
