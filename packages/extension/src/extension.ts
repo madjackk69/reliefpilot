@@ -25,6 +25,7 @@ import { GithubSearchIssuesTool } from './tools/github_search_issues';
 import { GithubSearchRepositoriesTool } from './tools/github_search_repositories';
 import { GoogleSearchTool } from './tools/google_search';
 import { LinkupSearchTool } from './tools/linkup_search';
+import { ExaSearchTool } from './tools/exa_search';
 import { openAiFetchProgressPanelByUid } from './utils/ai_fetch_progress';
 import { initAiFetchSessionStorage, registerAiFetchSessionConfigWatcher } from './utils/ai_fetch_sessions';
 import { askReportHistory, formatTimestampSeconds, initAskReportHistoryStorage, registerAskReportHistoryConfigWatcher } from './utils/ask_report_history';
@@ -45,6 +46,9 @@ import { initGoogleSessionStorage, registerGoogleSessionConfigWatcher } from './
 import { hasLinkupApiKey, initLinkupAuth, setupOrUpdateLinkupApiKey } from './utils/linkup_search_auth';
 import { openLinkupContentPanelByUid } from './utils/linkup_search_content_panel';
 import { initLinkupSessionStorage, registerLinkupSessionConfigWatcher } from './utils/linkup_search_content_sessions';
+import { hasExaApiKey, initExaAuth, setupOrUpdateExaApiKey } from './utils/exa_search_auth';
+import { openExaContentPanelByUid } from './utils/exa_search_content_panel';
+import { initExaSessionStorage, registerExaSessionConfigWatcher } from './utils/exa_search_content_sessions';
 import { statusBarActivity } from './utils/statusBar';
 
 // Guard to ensure language model tools are registered only once per extension host process.
@@ -213,6 +217,14 @@ async function ensureLanguageModelToolsRegistered(context: vscode.ExtensionConte
     }
 
     try {
+      const disposable = vscode.lm.registerTool('exa_search', new ExaSearchTool());
+      context.subscriptions.push(disposable);
+      outputChannel.appendLine('Registered language model tool: exa_search.');
+    } catch (err) {
+      outputChannel.appendLine(`Failed to register language model tool exa_search: ${err instanceof Error ? err.message : String(err)}`);
+    }
+
+    try {
       const disposable = vscode.lm.registerTool('felo_search', new FeloSearchTool());
       context.subscriptions.push(disposable);
       outputChannel.appendLine('Registered language model tool: felo_search.');
@@ -325,6 +337,7 @@ async function showReliefPilotMenu() {
   const googleApiKeyExists = await hasGoogleApiKey();
   const googleSearchEngineIdExists = await hasGoogleSearchEngineId();
   const linkupApiKeyExists = await hasLinkupApiKey();
+  const exaApiKeyExists = await hasExaApiKey();
   const tokenMenuLabel = context7TokenExists
     ? 'Update API-token `context7`'
     : 'Setup API-token `context7`';
@@ -340,6 +353,9 @@ async function showReliefPilotMenu() {
   const linkupApiKeyMenuLabel = linkupApiKeyExists
     ? 'Update API-token `LINKUP_API_KEY`'
     : 'Setup API-token `LINKUP_API_KEY`';
+  const exaApiKeyMenuLabel = exaApiKeyExists
+    ? 'Update API-token `EXA_API_KEY`'
+    : 'Setup API-token `EXA_API_KEY`';
 
   const items: vscode.QuickPickItem[] = [
     {
@@ -382,6 +398,10 @@ async function showReliefPilotMenu() {
       label: linkupApiKeyMenuLabel,
       description: linkupApiKeyExists ? 'Change stored Linkup API token `LINKUP_API_KEY`' : 'Store a new Linkup API token `LINKUP_API_KEY` securely',
     },
+    {
+      label: exaApiKeyMenuLabel,
+      description: exaApiKeyExists ? 'Change stored Exa API token `EXA_API_KEY`' : 'Store a new Exa API token `EXA_API_KEY` securely',
+    },
   ];
 
   const pick = await vscode.window.showQuickPick(items, {
@@ -415,6 +435,8 @@ async function showReliefPilotMenu() {
     await setupOrUpdateGoogleSearchEngineId();
   } else if (pick.label === linkupApiKeyMenuLabel) {
     await setupOrUpdateLinkupApiKey();
+  } else if (pick.label === exaApiKeyMenuLabel) {
+    await setupOrUpdateExaApiKey();
   }
 }
 
@@ -657,6 +679,7 @@ export const activate = async (context: vscode.ExtensionContext) => {
   initGitHubAuth(context);
   initGoogleAuth(context);
   initLinkupAuth(context);
+  initExaAuth(context);
   // Initialize ask_report history storage (load from workspace storage)
   initAskReportHistoryStorage(context);
   // Initialize session storage
@@ -667,6 +690,7 @@ export const activate = async (context: vscode.ExtensionContext) => {
   initGithubSessionStorage(context);
   initGoogleSessionStorage(context);
   initLinkupSessionStorage(context);
+  initExaSessionStorage(context);
   // Watchers for dynamic limit application on configuration change
   registerAiFetchSessionConfigWatcher(context);
   registerContext7SessionConfigWatcher(context);
@@ -675,6 +699,7 @@ export const activate = async (context: vscode.ExtensionContext) => {
   registerGithubSessionConfigWatcher(context);
   registerGoogleSessionConfigWatcher(context);
   registerLinkupSessionConfigWatcher(context);
+  registerExaSessionConfigWatcher(context);
 
   if (vscode.lm) {
     await ensureLanguageModelToolsRegistered(context, outputChannel);
@@ -699,6 +724,7 @@ export const activate = async (context: vscode.ExtensionContext) => {
     vscode.commands.registerCommand('reliefpilot.google.setupApiKey', () => setupOrUpdateGoogleApiKey()),
     vscode.commands.registerCommand('reliefpilot.google.setupSearchEngineId', () => setupOrUpdateGoogleSearchEngineId()),
     vscode.commands.registerCommand('reliefpilot.linkup.setupApiKey', () => setupOrUpdateLinkupApiKey()),
+    vscode.commands.registerCommand('reliefpilot.exa.setupApiKey', () => setupOrUpdateExaApiKey()),
   );
   registerSpecsModeCommand(context);
   showServerStatusBar();
@@ -735,6 +761,13 @@ export const activate = async (context: vscode.ExtensionContext) => {
   context.subscriptions.push(
     vscode.commands.registerCommand('reliefpilot.linkup.showContent', async (args?: { uid?: string }) => {
       await openLinkupContentPanelByUid(args?.uid ?? '');
+    })
+  );
+
+  // Command: open Exa content webview (shown from Markdown command link for Exa tool)
+  context.subscriptions.push(
+    vscode.commands.registerCommand('reliefpilot.exa.showContent', async (args?: { uid?: string }) => {
+      await openExaContentPanelByUid(args?.uid ?? '');
     })
   );
 

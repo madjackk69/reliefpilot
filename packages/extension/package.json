@@ -3,7 +3,7 @@
   "displayName": "Relief Pilot",
   "description": "A Swiss Army knife for AI agents in VS Code: safer tool calling, human-in-the-loop approvals, and smarter doc fetching to boost productivity and save you money.",
   "publisher": "ivan-mezentsev",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "type": "commonjs",
   "icon": "icon.png",
   "categories": [
@@ -176,6 +176,13 @@
           "minimum": 1,
           "maximum": 1000,
           "description": "Maximum number of linkup session history entries to keep."
+        },
+        "reliefpilot.exaHistoryMaxEntries": {
+          "type": "number",
+          "default": 20,
+          "minimum": 1,
+          "maximum": 1000,
+          "description": "Maximum number of exa session history entries to keep."
         },
         "reliefpilot.duckduckgoHistoryMaxEntries": {
           "type": "number",
@@ -1014,6 +1021,77 @@
               "description": "Maximum number of results to return (default: 5).",
               "default": 5,
               "minimum": 1
+            }
+          },
+          "required": [
+            "query"
+          ]
+        }
+      },
+      {
+        "name": "exa_search",
+        "displayName": "Exa: Search web",
+        "modelDescription": "Search the web via Exa API.",
+        "canBeReferencedInPrompt": true,
+        "toolReferenceName": "exa_search",
+        "icon": "icon.png",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "query": {
+              "type": "string",
+              "description": "Search query."
+            },
+            "maxResults": {
+              "type": "integer",
+              "description": "Number of results to return. Default 10, min 1, max 25.",
+              "default": 10,
+              "minimum": 1,
+              "maximum": 25
+            },
+            "publishedDateRange": {
+              "type": "object",
+              "description": "Publication date range filter (RFC3339/ISO 8601 date-time or YYYY-MM-DD).",
+              "properties": {
+                "fromDate": {
+                  "type": "string",
+                  "description": "Start published date (inclusive-ish)."
+                },
+                "toDate": {
+                  "type": "string",
+                  "description": "End published date (inclusive-ish)."
+                }
+              }
+            },
+            "crawlDateRange": {
+              "type": "object",
+              "description": "Crawl date range filter (RFC3339/ISO 8601 date-time or YYYY-MM-DD).",
+              "properties": {
+                "fromDate": {
+                  "type": "string",
+                  "description": "Start crawl date."
+                },
+                "toDate": {
+                  "type": "string",
+                  "description": "End crawl date."
+                }
+              }
+            },
+            "userLocation": {
+              "type": "string",
+              "description": "Two-letter ISO country code (e.g., US)."
+            },
+            "includeText": {
+              "type": "string",
+              "description": "Exact phrase that must appear in webpage text (up to 5 words)."
+            },
+            "excludeText": {
+              "type": "string",
+              "description": "Exact phrase that must NOT appear in webpage text (up to 5 words)."
+            },
+            "domain": {
+              "type": "string",
+              "description": "Domain filter (e.g., arxiv.org). A URL is also accepted and will be normalized to domain."
             }
           },
           "required": [
