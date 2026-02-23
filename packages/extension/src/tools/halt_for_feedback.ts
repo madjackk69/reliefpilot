@@ -99,6 +99,10 @@ export async function openOrFocusHaltForFeedback(): Promise<void> {
       }
       textarea { display: block; }
       .actions { justify-content: center; }
+      @keyframes voice-pulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.45; }
+      }
     </style>
   </head>
   <body>
@@ -108,7 +112,10 @@ export async function openOrFocusHaltForFeedback(): Promise<void> {
         <p class="halt__subtitle">Resume work, or cancel the current tool execution by sending feedback.</p>
       </section>
 
-      <textarea id="feedback" class="textarea" aria-label="Feedback" placeholder="Type feedback…"></textarea>
+      <div style="position:relative;">
+        <textarea id="feedback" class="textarea" aria-label="Feedback" placeholder="Type feedback…"></textarea>
+        <button id="voiceBtn" class="btn secondary icon-btn voice-btn" aria-label="Voice input" title="Voice input"></button>
+      </div>
 
       <div class="actions" role="group" aria-label="Actions">
         <button id="resumeBtn" class="btn">Resume work</button>
@@ -145,6 +152,11 @@ export async function openOrFocusHaltForFeedback(): Promise<void> {
       persistState();
 
       textarea.addEventListener('input', () => {
+        if (voiceActive) {
+          voiceActive = false;
+          try { haltRecognition.stop(); } catch {}
+          setHaltVoiceBtnState(false);
+        }
         updateSendState();
         persistState();
         vscode.postMessage({ type: 'draft', value: textarea.value || '' });
@@ -181,6 +193,90 @@ export async function openOrFocusHaltForFeedback(): Promise<void> {
         persistState();
         vscode.postMessage({ type: 'send', value: text });
       });
+
+      // Voice recognition setup
+      const haltVoiceBtn = /** @type {HTMLButtonElement} */ (document.getElementById('voiceBtn'));
+      const HaltSpeechRecognitionAPI = window.SpeechRecognition || window.webkitSpeechRecognition;
+      let haltRecognition = null;
+      let voiceActive = false;
+      let haltVoiceBaseText = '';
+      let haltVoiceFinalText = '';
+
+      function setHaltVoiceIcon(active) {
+        if (!haltVoiceBtn) return;
+        if (active) {
+          haltVoiceBtn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><rect x="9" y="2" width="6" height="12" rx="3" fill="currentColor"/><path d="M5 11a7 7 0 0 0 14 0" stroke="currentColor" stroke-width="2" stroke-linecap="round" fill="none"/><line x1="12" y1="18" x2="12" y2="22" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><line x1="8" y1="22" x2="16" y2="22" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>';
+        } else {
+          haltVoiceBtn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><rect x="9" y="2" width="6" height="12" rx="3" stroke="currentColor" stroke-width="2" fill="none"/><path d="M5 11a7 7 0 0 0 14 0" stroke="currentColor" stroke-width="2" stroke-linecap="round" fill="none"/><line x1="12" y1="18" x2="12" y2="22" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><line x1="8" y1="22" x2="16" y2="22" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>';
+        }
+      }
+
+      function setHaltVoiceBtnState(active) {
+        if (!haltVoiceBtn) return;
+        if (active) {
+          haltVoiceBtn.setAttribute('aria-label', 'Stop voice input');
+          haltVoiceBtn.setAttribute('title', 'Stop voice input');
+          haltVoiceBtn.classList.add('recording');
+        } else {
+          haltVoiceBtn.setAttribute('aria-label', 'Voice input');
+          haltVoiceBtn.setAttribute('title', 'Voice input');
+          haltVoiceBtn.classList.remove('recording');
+        }
+        setHaltVoiceIcon(active);
+      }
+
+      if (HaltSpeechRecognitionAPI) {
+        haltRecognition = new HaltSpeechRecognitionAPI();
+        haltRecognition.continuous = true;
+        haltRecognition.interimResults = true;
+        haltRecognition.onresult = (event) => {
+          let interim = '';
+          let hasFinal = false;
+          for (let i = event.resultIndex; i < event.results.length; i++) {
+            const transcript = event.results[i][0].transcript;
+            if (event.results[i].isFinal) {
+              haltVoiceFinalText += transcript;
+              hasFinal = true;
+            } else {
+              interim += transcript;
+            }
+          }
+          textarea.value = haltVoiceBaseText + haltVoiceFinalText + interim;
+          updateSendState();
+          if (hasFinal) persistState();
+        };
+        haltRecognition.onerror = () => {
+          voiceActive = false;
+          setHaltVoiceBtnState(false);
+        };
+        haltRecognition.onend = () => {
+          if (voiceActive) {
+            try { haltRecognition.start(); } catch { voiceActive = false; setHaltVoiceBtnState(false); }
+          } else {
+            setHaltVoiceBtnState(false);
+          }
+        };
+        if (haltVoiceBtn) {
+          setHaltVoiceIcon(false);
+          haltVoiceBtn.addEventListener('click', () => {
+            if (!voiceActive) {
+              voiceActive = true;
+              haltVoiceBaseText = textarea.value;
+              haltVoiceFinalText = '';
+              setHaltVoiceBtnState(true);
+              try { haltRecognition.start(); } catch { voiceActive = false; setHaltVoiceBtnState(false); }
+            } else {
+              voiceActive = false;
+              try { haltRecognition.stop(); } catch {}
+              setHaltVoiceBtnState(false);
+              updateSendState();
+              persistState();
+            }
+          });
+        }
+      } else if (haltVoiceBtn) {
+        haltVoiceBtn.style.display = 'none';
+      }
 
       window.addEventListener('message', (event) => {
         const msg = event.data;
