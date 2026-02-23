@@ -243,6 +243,12 @@ export async function openOrFocusHaltForFeedback(): Promise<void> {
             vscode.postMessage({ type: 'draft', value: msg.text });
           }
         }
+        if (msg.type === 'voicePartial') {
+          if (typeof msg.text === 'string') {
+            textarea.value = msg.text;
+            updateSendState();
+          }
+        }
       });
 
       // Focus the textarea on open.
@@ -290,16 +296,25 @@ export async function openOrFocusHaltForFeedback(): Promise<void> {
             }
             if (msg.type === 'startVoice') {
                 const currentText = typeof msg.currentText === 'string' ? msg.currentText : ''
-                let voiceResult: string | undefined
-                try {
-                    voiceResult = await vscode.window.showInputBox({
-                        value: currentText,
-                        prompt: 'Speak or type your feedback (use the microphone icon for VS Code Speech)',
-                        placeHolder: 'Type feedback…',
-                        ignoreFocusOut: true,
-                    })
-                } catch { /* ignore */ }
-                try { panel.webview.postMessage({ type: 'voiceResult', text: voiceResult }) } catch { /* ignore */ }
+                const inputBox = vscode.window.createInputBox()
+                inputBox.value = currentText
+                inputBox.prompt = 'Speak (click 🎤 for VS Code Speech) or type, then press Enter'
+                inputBox.placeholder = 'Type or speak your feedback…'
+                inputBox.ignoreFocusOut = true
+                let finalValue: string | undefined
+                const d1 = inputBox.onDidChangeValue((value) => {
+                    try { panel.webview.postMessage({ type: 'voicePartial', text: value }) } catch { /* ignore */ }
+                })
+                const d2 = inputBox.onDidAccept(() => {
+                    finalValue = inputBox.value
+                    inputBox.hide()
+                })
+                const d3 = inputBox.onDidHide(() => {
+                    d1.dispose(); d2.dispose(); d3.dispose()
+                    inputBox.dispose()
+                    try { panel.webview.postMessage({ type: 'voiceResult', text: finalValue }) } catch { /* ignore */ }
+                })
+                inputBox.show()
                 return
             }
         }),

@@ -655,6 +655,14 @@ export async function askReport(opts: AskReportOptions): Promise<AskUserResult> 
                     applyInit(msg.payload);
                     return;
                 }
+                if (msg.type === 'voicePartial') {
+                    if (typeof msg.text === 'string') {
+                        el.textarea.value = msg.text;
+                        updateTextareaVisibility();
+                        updateSubmitState();
+                        updateDockHeightVar();
+                    }
+                }
                 if (msg.type === 'voiceResult') {
                     if (el.voiceBtn) setVoiceBtnState(false);
                     if (typeof msg.text === 'string') {
@@ -755,16 +763,25 @@ export async function askReport(opts: AskReportOptions): Promise<AskUserResult> 
                     }
                     case 'startVoice': {
                         const currentText = typeof msg.currentText === 'string' ? msg.currentText : ''
-                        let voiceResult: string | undefined
-                        try {
-                            voiceResult = await vscode.window.showInputBox({
-                                value: currentText,
-                                prompt: 'Speak or type your response (use the microphone icon for VS Code Speech)',
-                                placeHolder: 'Type your response…',
-                                ignoreFocusOut: true,
-                            })
-                        } catch { /* ignore */ }
-                        try { panel.webview.postMessage({ type: 'voiceResult', text: voiceResult }) } catch { /* ignore */ }
+                        const inputBox = vscode.window.createInputBox()
+                        inputBox.value = currentText
+                        inputBox.prompt = 'Speak (click 🎤 for VS Code Speech) or type, then press Enter'
+                        inputBox.placeholder = 'Type or speak your response…'
+                        inputBox.ignoreFocusOut = true
+                        let finalValue: string | undefined
+                        const d1 = inputBox.onDidChangeValue((value) => {
+                            try { panel.webview.postMessage({ type: 'voicePartial', text: value }) } catch { /* ignore */ }
+                        })
+                        const d2 = inputBox.onDidAccept(() => {
+                            finalValue = inputBox.value
+                            inputBox.hide()
+                        })
+                        const d3 = inputBox.onDidHide(() => {
+                            d1.dispose(); d2.dispose(); d3.dispose()
+                            inputBox.dispose()
+                            try { panel.webview.postMessage({ type: 'voiceResult', text: finalValue }) } catch { /* ignore */ }
+                        })
+                        inputBox.show()
                         return
                     }
                     default:
