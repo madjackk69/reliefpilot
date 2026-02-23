@@ -152,11 +152,6 @@ export async function openOrFocusHaltForFeedback(): Promise<void> {
       persistState();
 
       textarea.addEventListener('input', () => {
-        if (voiceActive) {
-          voiceActive = false;
-          try { haltRecognition.stop(); } catch {}
-          setHaltVoiceBtnState(false);
-        }
         updateSendState();
         persistState();
         vscode.postMessage({ type: 'draft', value: textarea.value || '' });
@@ -194,13 +189,8 @@ export async function openOrFocusHaltForFeedback(): Promise<void> {
         vscode.postMessage({ type: 'send', value: text });
       });
 
-      // Voice recognition setup
+      // Voice input: handled by extension host (VS Code Speech integration via showInputBox)
       const haltVoiceBtn = /** @type {HTMLButtonElement} */ (document.getElementById('voiceBtn'));
-      const HaltSpeechRecognitionAPI = window.SpeechRecognition || window.webkitSpeechRecognition;
-      let haltRecognition = null;
-      let voiceActive = false;
-      let haltVoiceBaseText = '';
-      let haltVoiceFinalText = '';
 
       function setHaltVoiceIcon(active) {
         if (!haltVoiceBtn) return;
@@ -214,8 +204,8 @@ export async function openOrFocusHaltForFeedback(): Promise<void> {
       function setHaltVoiceBtnState(active) {
         if (!haltVoiceBtn) return;
         if (active) {
-          haltVoiceBtn.setAttribute('aria-label', 'Stop voice input');
-          haltVoiceBtn.setAttribute('title', 'Stop voice input');
+          haltVoiceBtn.setAttribute('aria-label', 'Waiting for voice input…');
+          haltVoiceBtn.setAttribute('title', 'Waiting for voice input…');
           haltVoiceBtn.classList.add('recording');
         } else {
           haltVoiceBtn.setAttribute('aria-label', 'Voice input');
@@ -225,57 +215,12 @@ export async function openOrFocusHaltForFeedback(): Promise<void> {
         setHaltVoiceIcon(active);
       }
 
-      if (HaltSpeechRecognitionAPI) {
-        haltRecognition = new HaltSpeechRecognitionAPI();
-        haltRecognition.continuous = true;
-        haltRecognition.interimResults = true;
-        haltRecognition.onresult = (event) => {
-          let interim = '';
-          let hasFinal = false;
-          for (let i = event.resultIndex; i < event.results.length; i++) {
-            const transcript = event.results[i][0].transcript;
-            if (event.results[i].isFinal) {
-              haltVoiceFinalText += transcript;
-              hasFinal = true;
-            } else {
-              interim += transcript;
-            }
-          }
-          textarea.value = haltVoiceBaseText + haltVoiceFinalText + interim;
-          updateSendState();
-          if (hasFinal) persistState();
-        };
-        haltRecognition.onerror = () => {
-          voiceActive = false;
-          setHaltVoiceBtnState(false);
-        };
-        haltRecognition.onend = () => {
-          if (voiceActive) {
-            try { haltRecognition.start(); } catch { voiceActive = false; setHaltVoiceBtnState(false); }
-          } else {
-            setHaltVoiceBtnState(false);
-          }
-        };
-        if (haltVoiceBtn) {
-          setHaltVoiceIcon(false);
-          haltVoiceBtn.addEventListener('click', () => {
-            if (!voiceActive) {
-              voiceActive = true;
-              haltVoiceBaseText = textarea.value;
-              haltVoiceFinalText = '';
-              setHaltVoiceBtnState(true);
-              try { haltRecognition.start(); } catch { voiceActive = false; setHaltVoiceBtnState(false); }
-            } else {
-              voiceActive = false;
-              try { haltRecognition.stop(); } catch {}
-              setHaltVoiceBtnState(false);
-              updateSendState();
-              persistState();
-            }
-          });
-        }
-      } else if (haltVoiceBtn) {
-        haltVoiceBtn.style.display = 'none';
+      if (haltVoiceBtn) {
+        setHaltVoiceIcon(false);
+        haltVoiceBtn.addEventListener('click', () => {
+          setHaltVoiceBtnState(true);
+          vscode.postMessage({ type: 'startVoice', currentText: textarea.value || '' });
+        });
       }
 
       window.addEventListener('message', (event) => {
@@ -287,6 +232,15 @@ export async function openOrFocusHaltForFeedback(): Promise<void> {
             textarea.value = msg.draft;
             updateSendState();
             persistState();
+          }
+        }
+        if (msg.type === 'voiceResult') {
+          setHaltVoiceBtnState(false);
+          if (typeof msg.text === 'string') {
+            textarea.value = msg.text;
+            updateSendState();
+            persistState();
+            vscode.postMessage({ type: 'draft', value: msg.text });
           }
         }
       });
@@ -310,7 +264,7 @@ export async function openOrFocusHaltForFeedback(): Promise<void> {
     )
 
     disposables.push(
-        panel.webview.onDidReceiveMessage((msg: any) => {
+        panel.webview.onDidReceiveMessage(async (msg: any) => {
             if (!msg || typeof msg !== 'object') return
             if (msg.type === 'draft') {
                 const value = typeof msg.value === 'string' ? msg.value : ''
@@ -332,6 +286,20 @@ export async function openOrFocusHaltForFeedback(): Promise<void> {
                 }
                 haltForFeedbackController.decline(trimmed)
                 try { panel.dispose() } catch { /* ignore */ }
+                return
+            }
+            if (msg.type === 'startVoice') {
+                const currentText = typeof msg.currentText === 'string' ? msg.currentText : ''
+                let voiceResult: string | undefined
+                try {
+                    voiceResult = await vscode.window.showInputBox({
+                        value: currentText,
+                        prompt: 'Speak or type your feedback (use the microphone icon for VS Code Speech)',
+                        placeHolder: 'Type feedback…',
+                        ignoreFocusOut: true,
+                    })
+                } catch { /* ignore */ }
+                try { panel.webview.postMessage({ type: 'voiceResult', text: voiceResult }) } catch { /* ignore */ }
                 return
             }
         }),

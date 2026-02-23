@@ -204,12 +204,6 @@ export async function askReport(opts: AskReportOptions): Promise<AskUserResult> 
             let paused = false;
             /** @type {number | undefined} */
             let intervalId = undefined;
-            /** @type {boolean} */
-            let voiceActive = false;
-            /** @type {string} */
-            let voiceBaseText = '';
-            /** @type {string} */
-            let voiceFinalText = '';
 
             /** @type {boolean} */
             let markdownLinkHandlerAttached = false;
@@ -456,11 +450,6 @@ export async function askReport(opts: AskReportOptions): Promise<AskUserResult> 
 
             // Local UI events
             el.textarea.addEventListener('input', () => {
-                if (voiceActive) {
-                    voiceActive = false;
-                    try { recognition.stop(); } catch {}
-                    setVoiceBtnState(false);
-                }
                 updateSubmitState();
                 persistState();
                     updateDockHeightVar();
@@ -497,11 +486,7 @@ export async function askReport(opts: AskReportOptions): Promise<AskUserResult> 
                 // Recompute reserved space when viewport changes
                 window.addEventListener('resize', () => updateDockHeightVar());
 
-            // Voice recognition setup
-            const SpeechRecognitionAPI = window.SpeechRecognition || window.webkitSpeechRecognition;
-            /** @type {InstanceType<typeof SpeechRecognitionAPI> | null} */
-            let recognition = null;
-
+            // Voice input: handled by extension host (VS Code Speech integration via showInputBox)
             function setVoiceIcon(active) {
                 if (!el.voiceBtn) return;
                 if (active) {
@@ -514,8 +499,8 @@ export async function askReport(opts: AskReportOptions): Promise<AskUserResult> 
             function setVoiceBtnState(active) {
                 if (!el.voiceBtn) return;
                 if (active) {
-                    el.voiceBtn.setAttribute('aria-label', 'Stop voice input');
-                    el.voiceBtn.setAttribute('title', 'Stop voice input');
+                    el.voiceBtn.setAttribute('aria-label', 'Waiting for voice input…');
+                    el.voiceBtn.setAttribute('title', 'Waiting for voice input…');
                     el.voiceBtn.classList.add('recording');
                 } else {
                     el.voiceBtn.setAttribute('aria-label', 'Voice input');
@@ -525,58 +510,13 @@ export async function askReport(opts: AskReportOptions): Promise<AskUserResult> 
                 setVoiceIcon(active);
             }
 
-            if (SpeechRecognitionAPI) {
-                recognition = new SpeechRecognitionAPI();
-                recognition.continuous = true;
-                recognition.interimResults = true;
-                recognition.onresult = (event) => {
-                    let interim = '';
-                    let hasFinal = false;
-                    for (let i = event.resultIndex; i < event.results.length; i++) {
-                        const transcript = event.results[i][0].transcript;
-                        if (event.results[i].isFinal) {
-                            voiceFinalText += transcript;
-                            hasFinal = true;
-                        } else {
-                            interim += transcript;
-                        }
-                    }
-                    el.textarea.value = voiceBaseText + voiceFinalText + interim;
-                    updateSubmitState();
-                    if (hasFinal) persistState();
-                };
-                recognition.onerror = () => {
-                    voiceActive = false;
-                    setVoiceBtnState(false);
-                };
-                recognition.onend = () => {
-                    if (voiceActive) {
-                        try { recognition.start(); } catch { voiceActive = false; setVoiceBtnState(false); }
-                    } else {
-                        setVoiceBtnState(false);
-                    }
-                };
-                if (el.voiceBtn) {
-                    setVoiceIcon(false);
-                    el.voiceBtn.addEventListener('click', () => {
-                        if (initData.readonly || el.voiceBtn.disabled) return;
-                        if (!voiceActive) {
-                            voiceActive = true;
-                            voiceBaseText = el.textarea.value;
-                            voiceFinalText = '';
-                            setVoiceBtnState(true);
-                            try { recognition.start(); } catch { voiceActive = false; setVoiceBtnState(false); }
-                        } else {
-                            voiceActive = false;
-                            try { recognition.stop(); } catch {}
-                            setVoiceBtnState(false);
-                            updateSubmitState();
-                            persistState();
-                        }
-                    });
-                }
-            } else if (el.voiceBtn) {
-                el.voiceBtn.style.display = 'none';
+            if (el.voiceBtn) {
+                setVoiceIcon(false);
+                el.voiceBtn.addEventListener('click', () => {
+                    if (initData.readonly || el.voiceBtn.disabled) return;
+                    setVoiceBtnState(true);
+                    vscode.postMessage({ type: 'startVoice', currentText: el.textarea.value || '' });
+                });
             }
 
             function attachMarkdownLinkInterceptorOnce() {
@@ -710,8 +650,21 @@ export async function askReport(opts: AskReportOptions): Promise<AskUserResult> 
 
             window.addEventListener('message', (event) => {
                 const msg = event.data;
-                if (!msg || msg.type !== 'init') return;
-                applyInit(msg.payload);
+                if (!msg || typeof msg !== 'object') return;
+                if (msg.type === 'init') {
+                    applyInit(msg.payload);
+                    return;
+                }
+                if (msg.type === 'voiceResult') {
+                    if (el.voiceBtn) setVoiceBtnState(false);
+                    if (typeof msg.text === 'string') {
+                        el.textarea.value = msg.text;
+                        updateTextareaVisibility();
+                        updateSubmitState();
+                        persistState();
+                        updateDockHeightVar();
+                    }
+                }
             });
 
             // Bootstrap initial render from inlined payload (does not depend on extension-to-webview messaging timing)
@@ -798,6 +751,20 @@ export async function askReport(opts: AskReportOptions): Promise<AskUserResult> 
                         } catch {
                             // ignore errors silently (no notifications)
                         }
+                        return
+                    }
+                    case 'startVoice': {
+                        const currentText = typeof msg.currentText === 'string' ? msg.currentText : ''
+                        let voiceResult: string | undefined
+                        try {
+                            voiceResult = await vscode.window.showInputBox({
+                                value: currentText,
+                                prompt: 'Speak or type your response (use the microphone icon for VS Code Speech)',
+                                placeHolder: 'Type your response…',
+                                ignoreFocusOut: true,
+                            })
+                        } catch { /* ignore */ }
+                        try { panel.webview.postMessage({ type: 'voiceResult', text: voiceResult }) } catch { /* ignore */ }
                         return
                     }
                     default:

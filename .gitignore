@@ -3,6 +3,7 @@
 packages/extension/.vscode-test/**
 packages/extension/media/markdown-deps.js
 packages/extension/media/highlight.github.css
+packages/extension/package-lock.json
 dist
 node_modules
 out
