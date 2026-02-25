@@ -5,6 +5,8 @@ function extractErrorMessage(rawText: string): string {
         const parsed = JSON.parse(rawText)
         const top = typeof parsed?.error?.message === 'string' ? parsed.error.message : ''
         if (top) return top
+        const msg = typeof parsed?.message === 'string' ? parsed.message : ''
+        if (msg) return msg
         return ''
     } catch {
         return ''
@@ -12,22 +14,16 @@ function extractErrorMessage(rawText: string): string {
 }
 
 export async function validateLinkupTokenFromResponse(status: number, rawText: string): Promise<boolean> {
-    if (status !== 401 && status !== 403) return false
+    // Per Linkup docs: invalid API key => 401 Unauthorized.
+    // 400 is reserved for missing/invalid parameters, so we should not trigger token setup on 400.
+    if (status !== 401) return false
 
-    const lowerRaw = rawText.toLowerCase()
+    // Keep a lightweight safeguard: only prompt if the payload *mentions* auth/key,
+    // to avoid false positives in case Linkup changes semantics.
+    const lowerRaw = (rawText || '').toLowerCase()
     const lowerMsg = extractErrorMessage(rawText).toLowerCase()
-
-    const authHints = [
-        'api key',
-        'token',
-        'bearer',
-        'authorization',
-        'unauthorized',
-        'forbidden',
-        'permission',
-    ]
-
-    const looksLikeAuthIssue = status === 401 || authHints.some((p) => lowerRaw.includes(p) || lowerMsg.includes(p))
+    const keyHints = ['api key', 'token', 'bearer', 'authorization', 'unauthorized']
+    const looksLikeAuthIssue = keyHints.some((p) => lowerRaw.includes(p) || lowerMsg.includes(p)) || lowerRaw.length === 0
     if (!looksLikeAuthIssue) return false
 
     let entered: string | undefined
