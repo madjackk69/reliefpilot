@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.9.1 - 2026-02-24
+
+- feat(terminal): improve new terminal initialization process
+- fix(exa): enhance error handling for Exa API token validation
+- fix(validate_linkup_token): refine token validation logic
+
 ## 0.9.0 - 2026-02-21
 
 - feat(exa): add Exa search tool and API integration

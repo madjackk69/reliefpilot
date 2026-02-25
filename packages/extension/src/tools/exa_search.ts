@@ -299,7 +299,15 @@ async function performExaSearch(input: ExaSearchInput, token: CancellationToken)
                 }
             }
 
-            if (res.status === 401 || res.status === 403) {
+            let isInvalidApiKeyTag = false
+            try {
+                const parsed = JSON.parse(text)
+                isInvalidApiKeyTag = typeof parsed?.tag === 'string' && parsed.tag.toUpperCase() === 'INVALID_API_KEY'
+            } catch {
+                isInvalidApiKeyTag = false
+            }
+
+            if (res.status === 400 || res.status === 401 || isInvalidApiKeyTag) {
                 const shouldRetry = await validateExaTokenFromResponse(res.status, text)
                 if (shouldRetry) {
                     continue

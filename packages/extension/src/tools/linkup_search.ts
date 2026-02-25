@@ -227,7 +227,7 @@ async function performLinkupSearch(input: LinkupSearchInput, token: Cancellation
                 }
             }
 
-            if (res.status === 401 || res.status === 403) {
+            if (res.status === 401) {
                 const shouldRetry = await validateLinkupTokenFromResponse(res.status, text)
                 if (shouldRetry) {
                     continue
