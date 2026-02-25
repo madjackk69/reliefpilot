@@ -51,9 +51,10 @@ export class TerminalProcess extends EventEmitter<TerminalProcessEvents> {
 	/**
 	 * Set to true by TerminalManager when the terminal was freshly created and
 	 * is about to receive its first command. In that case sendText-based paths
-	 * must add a brief delay to let the shell finish initialising
-	 * readline mode (raw mode) before sending text; otherwise the PTY driver
-	 * echoes characters in cooked mode, causing duplicate output.
+	 * must warm up shell integration and add a brief delay to let the shell
+	 * finish initialising readline mode (raw mode) before sending text;
+	 * otherwise the PTY driver may echo characters in cooked mode, causing
+	 * duplicate output.
 	 */
 	newTerminal: boolean = false
 	private isListening: boolean = true
@@ -164,18 +165,12 @@ export class TerminalProcess extends EventEmitter<TerminalProcessEvents> {
 			return null
 		}
 
-		// For freshly created terminals the shell may not yet be in readline
-		// mode (raw mode) when this method is called. Shell integration reports
-		// itself as available after detecting OSC 633 markers, but the
-		// shell's line editor typically activates slightly later. Sending text
-		// while the PTY is still in cooked mode causes the terminal driver to
-		// echo the characters, resulting in duplicate output.
-		//
-		// We first ensure CWD is detected (happens in precmd, right before the
-		// prompt) and then add a fixed delay to let readline finish activating.
-		// The flag is set by TerminalManager for freshly created terminals.
-		// Existing terminals already have readline active and skip the delay entirely.
+		// For freshly created terminals, warm up shell integration by sending an initial
+		// newline (Enter) and calling read() on that first execution (ignoring its output).
+		// This helps avoid missing output of the first real command due to shell
+		// integration initialisation ordering.
 		if (this.newTerminal) {
+			await this.warmUpNewTerminal(terminal, onStart)
 			try {
 				// Important: shellIntegration may not be defined yet in a brand new terminal.
 				// Waiting on cwd (reported from precmd) ensures the prompt is about to render.
@@ -188,7 +183,7 @@ export class TerminalProcess extends EventEmitter<TerminalProcessEvents> {
 			}
 			// CWD is reported from precmd which runs before the prompt is drawn
 			// and before readline enters raw mode. A brief delay bridges this gap.
-			await new Promise(resolve => setTimeout(resolve, 300))
+			await new Promise((resolve) => setTimeout(resolve, 300))
 		}
 
 		return new Promise<AsyncIterable<string> | null>((resolve) => {
@@ -220,6 +215,51 @@ export class TerminalProcess extends EventEmitter<TerminalProcessEvents> {
 			}
 
 			terminal.sendText(command, true)
+		})
+	}
+
+	private async warmUpNewTerminal(terminal: vscode.Terminal, onStart: any): Promise<void> {
+		// This is best-effort: the shell may not emit execution events for empty input in
+		// some configurations. We still send Enter, but we only wait a short time.
+		await new Promise<void>((resolve) => {
+			let settled = false
+			let disposable: vscode.Disposable | undefined
+			const timeoutHandle = setTimeout(() => {
+				if (settled) {
+					return
+				}
+				settled = true
+				disposable?.dispose()
+				resolve()
+			}, 1000)
+
+			try {
+				disposable = onStart((e: any) => {
+					if (settled) {
+						return
+					}
+					if (e?.terminal !== terminal || !e?.execution) {
+						return
+					}
+					settled = true
+					clearTimeout(timeoutHandle)
+					disposable?.dispose()
+					try {
+						// Call read() but ignore output; this primes the data stream.
+						getOrCreateExecutionStream(e.execution)
+					} catch {
+						// Ignore
+					}
+					resolve()
+				})
+			} catch {
+				clearTimeout(timeoutHandle)
+				resolve()
+				return
+			}
+
+			// Send Enter. Using empty text with addNewLine=true results in a newline.
+			terminal.sendText("", true)
 		})
 	}
 
