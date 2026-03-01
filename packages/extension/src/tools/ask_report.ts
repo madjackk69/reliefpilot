@@ -161,7 +161,10 @@ export async function askReport(opts: AskReportOptions): Promise<AskUserResult> 
         <footer class="askreport__footer askreport__dock" id="bottomDock">
             <div class="controls">
                 <fieldset id="optionsFieldset" class="options" aria-label="Ask report options"></fieldset>
-                <textarea id="customText" class="textarea" aria-label="Custom response" placeholder="Type your response…"></textarea>
+                <div class="textarea-wrapper">
+                    <textarea id="customText" class="textarea" aria-label="Custom response" placeholder="Type your response…"></textarea>
+                    <button id="voiceBtn" class="btn secondary icon-btn voice-btn" aria-label="Voice input" title="Voice input"></button>
+                </div>
             </div>
             <div class="actions">
                 <button id="submitBtn" class="btn primary" aria-label="Submit" disabled>Submit</button>
@@ -189,6 +192,7 @@ export async function askReport(opts: AskReportOptions): Promise<AskUserResult> 
                 textarea: document.getElementById('customText'),
                 submit: document.getElementById('submitBtn'),
                 cancel: document.getElementById('cancelBtn'),
+                voiceBtn: document.getElementById('voiceBtn'),
                     dock: document.getElementById('bottomDock'),
             };
 
@@ -268,6 +272,7 @@ export async function askReport(opts: AskReportOptions): Promise<AskUserResult> 
                 try { el.textarea.disabled = true; } catch {}
                 try { (el.options).setAttribute('disabled', ''); } catch {}
                 try { el.pauseBtn.disabled = true; } catch {}
+                try { if (el.voiceBtn) el.voiceBtn.disabled = true; } catch {}
             }
 
             function startTimer() {
@@ -481,6 +486,39 @@ export async function askReport(opts: AskReportOptions): Promise<AskUserResult> 
                 // Recompute reserved space when viewport changes
                 window.addEventListener('resize', () => updateDockHeightVar());
 
+            // Voice input: handled by extension host (VS Code Speech integration via showInputBox)
+            function setVoiceIcon(active) {
+                if (!el.voiceBtn) return;
+                if (active) {
+                    el.voiceBtn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><rect x="9" y="2" width="6" height="12" rx="3" fill="currentColor"/><path d="M5 11a7 7 0 0 0 14 0" stroke="currentColor" stroke-width="2" stroke-linecap="round" fill="none"/><line x1="12" y1="18" x2="12" y2="22" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><line x1="8" y1="22" x2="16" y2="22" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>';
+                } else {
+                    el.voiceBtn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><rect x="9" y="2" width="6" height="12" rx="3" stroke="currentColor" stroke-width="2" fill="none"/><path d="M5 11a7 7 0 0 0 14 0" stroke="currentColor" stroke-width="2" stroke-linecap="round" fill="none"/><line x1="12" y1="18" x2="12" y2="22" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><line x1="8" y1="22" x2="16" y2="22" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>';
+                }
+            }
+
+            function setVoiceBtnState(active) {
+                if (!el.voiceBtn) return;
+                if (active) {
+                    el.voiceBtn.setAttribute('aria-label', 'Waiting for voice input…');
+                    el.voiceBtn.setAttribute('title', 'Waiting for voice input…');
+                    el.voiceBtn.classList.add('recording');
+                } else {
+                    el.voiceBtn.setAttribute('aria-label', 'Voice input');
+                    el.voiceBtn.setAttribute('title', 'Voice input');
+                    el.voiceBtn.classList.remove('recording');
+                }
+                setVoiceIcon(active);
+            }
+
+            if (el.voiceBtn) {
+                setVoiceIcon(false);
+                el.voiceBtn.addEventListener('click', () => {
+                    if (initData.readonly || el.voiceBtn.disabled) return;
+                    setVoiceBtnState(true);
+                    vscode.postMessage({ type: 'startVoice', currentText: el.textarea.value || '' });
+                });
+            }
+
             function attachMarkdownLinkInterceptorOnce() {
                 if (markdownLinkHandlerAttached) return;
                 markdownLinkHandlerAttached = true;
@@ -596,6 +634,7 @@ export async function askReport(opts: AskReportOptions): Promise<AskUserResult> 
                     try { el.pauseBtn.style.display = 'none'; } catch {}
                     try { el.timer.style.display = 'none'; } catch {}
                     try { const bar = document.querySelector('.askreport__progress'); if (bar) bar.setAttribute('style', 'display: none;'); } catch {}
+                    try { if (el.voiceBtn) el.voiceBtn.style.display = 'none'; } catch {}
                     disableAllInputs();
                     // Ensure no timer
                     stopTimer();
@@ -611,8 +650,29 @@ export async function askReport(opts: AskReportOptions): Promise<AskUserResult> 
 
             window.addEventListener('message', (event) => {
                 const msg = event.data;
-                if (!msg || msg.type !== 'init') return;
-                applyInit(msg.payload);
+                if (!msg || typeof msg !== 'object') return;
+                if (msg.type === 'init') {
+                    applyInit(msg.payload);
+                    return;
+                }
+                if (msg.type === 'voicePartial') {
+                    if (typeof msg.text === 'string') {
+                        el.textarea.value = msg.text;
+                        updateTextareaVisibility();
+                        updateSubmitState();
+                        updateDockHeightVar();
+                    }
+                }
+                if (msg.type === 'voiceResult') {
+                    if (el.voiceBtn) setVoiceBtnState(false);
+                    if (typeof msg.text === 'string') {
+                        el.textarea.value = msg.text;
+                        updateTextareaVisibility();
+                        updateSubmitState();
+                        persistState();
+                        updateDockHeightVar();
+                    }
+                }
             });
 
             // Bootstrap initial render from inlined payload (does not depend on extension-to-webview messaging timing)
@@ -699,6 +759,29 @@ export async function askReport(opts: AskReportOptions): Promise<AskUserResult> 
                         } catch {
                             // ignore errors silently (no notifications)
                         }
+                        return
+                    }
+                    case 'startVoice': {
+                        const currentText = typeof msg.currentText === 'string' ? msg.currentText : ''
+                        const inputBox = vscode.window.createInputBox()
+                        inputBox.value = currentText
+                        inputBox.prompt = 'Speak (click 🎤 for VS Code Speech) or type, then press Enter'
+                        inputBox.placeholder = 'Type or speak your response…'
+                        inputBox.ignoreFocusOut = true
+                        let finalValue: string | undefined
+                        const d1 = inputBox.onDidChangeValue((value) => {
+                            try { panel.webview.postMessage({ type: 'voicePartial', text: value }) } catch { /* ignore */ }
+                        })
+                        const d2 = inputBox.onDidAccept(() => {
+                            finalValue = inputBox.value
+                            inputBox.hide()
+                        })
+                        const d3 = inputBox.onDidHide(() => {
+                            d1.dispose(); d2.dispose(); d3.dispose()
+                            inputBox.dispose()
+                            try { panel.webview.postMessage({ type: 'voiceResult', text: finalValue }) } catch { /* ignore */ }
+                        })
+                        inputBox.show()
                         return
                     }
                     default:

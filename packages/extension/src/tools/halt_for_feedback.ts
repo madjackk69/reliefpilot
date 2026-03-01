@@ -99,6 +99,10 @@ export async function openOrFocusHaltForFeedback(): Promise<void> {
       }
       textarea { display: block; }
       .actions { justify-content: center; }
+      @keyframes voice-pulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.45; }
+      }
     </style>
   </head>
   <body>
@@ -108,7 +112,10 @@ export async function openOrFocusHaltForFeedback(): Promise<void> {
         <p class="halt__subtitle">Resume work, or cancel the current tool execution by sending feedback.</p>
       </section>
 
-      <textarea id="feedback" class="textarea" aria-label="Feedback" placeholder="Type feedback…"></textarea>
+      <div style="position:relative;">
+        <textarea id="feedback" class="textarea" aria-label="Feedback" placeholder="Type feedback…"></textarea>
+        <button id="voiceBtn" class="btn secondary icon-btn voice-btn" aria-label="Voice input" title="Voice input"></button>
+      </div>
 
       <div class="actions" role="group" aria-label="Actions">
         <button id="resumeBtn" class="btn">Resume work</button>
@@ -182,6 +189,40 @@ export async function openOrFocusHaltForFeedback(): Promise<void> {
         vscode.postMessage({ type: 'send', value: text });
       });
 
+      // Voice input: handled by extension host (VS Code Speech integration via showInputBox)
+      const haltVoiceBtn = /** @type {HTMLButtonElement} */ (document.getElementById('voiceBtn'));
+
+      function setHaltVoiceIcon(active) {
+        if (!haltVoiceBtn) return;
+        if (active) {
+          haltVoiceBtn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><rect x="9" y="2" width="6" height="12" rx="3" fill="currentColor"/><path d="M5 11a7 7 0 0 0 14 0" stroke="currentColor" stroke-width="2" stroke-linecap="round" fill="none"/><line x1="12" y1="18" x2="12" y2="22" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><line x1="8" y1="22" x2="16" y2="22" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>';
+        } else {
+          haltVoiceBtn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><rect x="9" y="2" width="6" height="12" rx="3" stroke="currentColor" stroke-width="2" fill="none"/><path d="M5 11a7 7 0 0 0 14 0" stroke="currentColor" stroke-width="2" stroke-linecap="round" fill="none"/><line x1="12" y1="18" x2="12" y2="22" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><line x1="8" y1="22" x2="16" y2="22" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>';
+        }
+      }
+
+      function setHaltVoiceBtnState(active) {
+        if (!haltVoiceBtn) return;
+        if (active) {
+          haltVoiceBtn.setAttribute('aria-label', 'Waiting for voice input…');
+          haltVoiceBtn.setAttribute('title', 'Waiting for voice input…');
+          haltVoiceBtn.classList.add('recording');
+        } else {
+          haltVoiceBtn.setAttribute('aria-label', 'Voice input');
+          haltVoiceBtn.setAttribute('title', 'Voice input');
+          haltVoiceBtn.classList.remove('recording');
+        }
+        setHaltVoiceIcon(active);
+      }
+
+      if (haltVoiceBtn) {
+        setHaltVoiceIcon(false);
+        haltVoiceBtn.addEventListener('click', () => {
+          setHaltVoiceBtnState(true);
+          vscode.postMessage({ type: 'startVoice', currentText: textarea.value || '' });
+        });
+      }
+
       window.addEventListener('message', (event) => {
         const msg = event.data;
         if (!msg || typeof msg !== 'object') return;
@@ -191,6 +232,21 @@ export async function openOrFocusHaltForFeedback(): Promise<void> {
             textarea.value = msg.draft;
             updateSendState();
             persistState();
+          }
+        }
+        if (msg.type === 'voiceResult') {
+          setHaltVoiceBtnState(false);
+          if (typeof msg.text === 'string') {
+            textarea.value = msg.text;
+            updateSendState();
+            persistState();
+            vscode.postMessage({ type: 'draft', value: msg.text });
+          }
+        }
+        if (msg.type === 'voicePartial') {
+          if (typeof msg.text === 'string') {
+            textarea.value = msg.text;
+            updateSendState();
           }
         }
       });
@@ -214,7 +270,7 @@ export async function openOrFocusHaltForFeedback(): Promise<void> {
     )
 
     disposables.push(
-        panel.webview.onDidReceiveMessage((msg: any) => {
+        panel.webview.onDidReceiveMessage(async (msg: any) => {
             if (!msg || typeof msg !== 'object') return
             if (msg.type === 'draft') {
                 const value = typeof msg.value === 'string' ? msg.value : ''
@@ -236,6 +292,29 @@ export async function openOrFocusHaltForFeedback(): Promise<void> {
                 }
                 haltForFeedbackController.decline(trimmed)
                 try { panel.dispose() } catch { /* ignore */ }
+                return
+            }
+            if (msg.type === 'startVoice') {
+                const currentText = typeof msg.currentText === 'string' ? msg.currentText : ''
+                const inputBox = vscode.window.createInputBox()
+                inputBox.value = currentText
+                inputBox.prompt = 'Speak (click 🎤 for VS Code Speech) or type, then press Enter'
+                inputBox.placeholder = 'Type or speak your feedback…'
+                inputBox.ignoreFocusOut = true
+                let finalValue: string | undefined
+                const d1 = inputBox.onDidChangeValue((value) => {
+                    try { panel.webview.postMessage({ type: 'voicePartial', text: value }) } catch { /* ignore */ }
+                })
+                const d2 = inputBox.onDidAccept(() => {
+                    finalValue = inputBox.value
+                    inputBox.hide()
+                })
+                const d3 = inputBox.onDidHide(() => {
+                    d1.dispose(); d2.dispose(); d3.dispose()
+                    inputBox.dispose()
+                    try { panel.webview.postMessage({ type: 'voiceResult', text: finalValue }) } catch { /* ignore */ }
+                })
+                inputBox.show()
                 return
             }
         }),
